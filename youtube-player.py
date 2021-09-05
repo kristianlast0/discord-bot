@@ -67,7 +67,8 @@ def playTrack(ctx, vc, trackIndex):
         mh.stopped = False
 
 @bot.command(name='play')
-async def play(ctx, search = ""):
+async def play(ctx, *search):
+    search = (" ").join(search)
     user = ctx.author
     if user.voice is None or user.voice.channel is None: return
     voice_channel = user.voice.channel
@@ -83,10 +84,10 @@ async def play(ctx, search = ""):
         if mh.currentTrack['completed_at'] is not None and mh.hasNextTrack == True:
             mh.next()
         await ctx.send(f"Queued: **{added_track['title']}**")
-        await playTrack(ctx, vc, mh.currentTrackIndex)
+        playTrack(ctx, vc, mh.currentTrackIndex)
     elif search == "":
         if mh.stopped == True and not vc.is_playing():
-            await playTrack(ctx, vc, mh.currentTrackIndex)
+            playTrack(ctx, vc, mh.currentTrackIndex)
         if mh.stopped == False and vc.is_paused():
             await vc.resume()
  
@@ -142,7 +143,7 @@ async def back(ctx):
         mh.stopped = True
         vc.stop()
     mh.prev()
-    await playTrack(ctx, vc, mh.currentTrackIndex)
+    playTrack(ctx, vc, mh.currentTrackIndex)
 
 @bot.command(name='restart')
 async def restart(ctx):
@@ -159,7 +160,7 @@ async def restart(ctx):
         mh.stopped = True
         vc.stop()
     mh.currentTrackIndex = 0
-    await playTrack(ctx, vc, mh.currentTrackIndex)
+    playTrack(ctx, vc, mh.currentTrackIndex)
  
 @bot.command(name='resume')
 async def resume(ctx):
