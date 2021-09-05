@@ -39,18 +39,7 @@ async def flush(ctx):
     mh.flush()
     await ctx.send("Flushing queue.")
     print("Flushing queue.")
- 
-# def playNext(ctx, vc):
-#     if mh.stopped == False and mh.hasNextTrack == True:
-#         mh.next()
-#         if not vc.is_playing():
-#             filename = mh.currentTrack['filepath']
-#             source = discord.FFmpegPCMAudio(filename)
-#             # The playNext() function needs to be smarter.
-#             # When vc.stop() it will increment the current track index
-#             vc.play(source, after=lambda e: playNext(ctx, vc))
-#             ctx.send(f"Playing: **{mh.currentTrack['title']}**")
- 
+
 def onPlayerStopped(ctx, vc, lastTrackIndex):
     print("onPlayerStopped")
     if mh.stopped == False:

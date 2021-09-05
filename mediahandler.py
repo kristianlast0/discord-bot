@@ -137,29 +137,3 @@ class MediaHandler():
     @property
     def hasPrevTrack(self):
         return self.currentTrackIndex > 0 and len(self.tracks) > 0
- 
- 
- 
-# mh = MediaHandler()
- 
-# # Add tracks to queue
-# mh.addTrack('Phinehas - The fire itself')
-# mh.addTrack('Phinehas - Thorns')
-# mh.addTrack('Phinehas - War You Know')
-# mh.addTrack('Phinehas - The fire itself')
- 
-# # current track
-# print("Current track ("+str(mh.currentTrackIndex+1)+"/"+str(len(mh.tracks))+"): "+mh.currentTrack['title'])
- 
-# if mh.hasNextTrack:
-#     print('Go to next track if any')
-#     mh.next()
- 
-# print("Current track ("+str(mh.currentTrackIndex+1)+"/"+str(len(mh.tracks))+"): "+mh.currentTrack['title'])
-# print(mh.currentTrack['filepath'])
-# # print("")
-# # print("")
-# # print("QUEUE:")
-# # for track in mh.queue:
-# #     print(track['title'])
-# exit(0)
