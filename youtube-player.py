@@ -6,6 +6,7 @@ import random
 from mediahandler import MediaHandler
 import pyttsx3
 import json
+from datastore import welcome
 load_dotenv()
  
 # Get the API token from the .env file.
@@ -108,6 +109,8 @@ async def skip(ctx):
  
 @bot.command(name='welcome')
 async def welcome(ctx):
+    f, p = random.choice(list(welcome.items()))
+    print(f, p)
     vc = ctx.message.guild.voice_client
     path = os.getenv("track_path")+'tts-welcome.mp3'
     engine = pyttsx3.init()
