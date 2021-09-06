@@ -3,3 +3,4 @@ thumbnails/
 playlists/
 .env
 __pycache__/
+test.py
