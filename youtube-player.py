@@ -123,7 +123,7 @@ async def welcome(ctx):
     x = random.choice(list(wm.items()))
     print(x[0], ">", x[1])
 
-    path = os.getenv("track_path") + x[0] + ".mp3"
+    path = os.getenv("tts_path") + x[0] + ".mp3"
     if os.path.exists(path) and os.path.isfile(path):
         print("TTS file exists, playing from disc.")
         vc.play(discord.FFmpegPCMAudio(path))
