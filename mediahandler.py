@@ -112,8 +112,8 @@ class MediaHandler():
 
     def pop(self, index):
         if len(self.tracks) >= int(index) and int(index) >= 0:
-            x = self.tracks(index)
-            self.tracks.pop(index)
+            x = self.tracks[index]
+            self.tracks.pop[index]
             if index < self.trackIndex:
                 self.trackIndex -= 1
             return(x)
