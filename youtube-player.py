@@ -16,7 +16,7 @@ DISCORD_TOKEN = os.getenv("develop_token")
 client = discord.Client()
  
 if DISCORD_TOKEN == os.getenv("discord_token"): bot = commands.Bot(command_prefix='!')
-else: bot = commands.Bot(command_prefix='#')
+else: bot = commands.Bot(command_prefix='$')
  
 mh = MediaHandler()
  
@@ -198,6 +198,15 @@ async def insult(ctx):
     from datastore import insult_noun as noun
     i = "You " + random.choice (adj) + " " + random.choice (noun)
     await ctx.send(i)
+
+@client.event
+async def on_voice_state_update(member, before, after):
+    if not before.channel and after.channel:
+        role = discord.utils.get(member.guild.roles, name="role name")
+        await member.add_roles(role)
+    elif before.channel and not after.channel:
+        role = discord.utils.get(member.guild.roles, name="role name")
+        await member.remove_roles(role)
  
 @bot.event
 async def on_ready():
