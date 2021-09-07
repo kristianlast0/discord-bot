@@ -8,6 +8,7 @@ import pyttsx3
 import os, json
 import pandas as pd
 import json
+from datetime import datetime
 
 load_dotenv()
  
@@ -190,7 +191,7 @@ async def save(ctx, *name):
         await ctx.send("**Please enter a name for the playlist**")
         return
     playlist = { "name": name, "tracks": mh.tracks }
-    with open(os.getenv("playlist_path")+'data.json', 'w') as outfile:
+    with open(os.getenv("playlist_path")+str(datetime.timestamp(datetime.now()))+'.json', 'w') as outfile:
         json.dump(playlist, outfile)
         await ctx.send("**Playlist saved!:** \n"+name+" with "+str(len(mh.tracks))+" tracks")
 
@@ -202,7 +203,6 @@ async def playlists(ctx):
     for index, js in enumerate(json_files):
         with open(os.path.join(os.getenv("playlist_path"), js)) as json_file:
             playlist = json.load(json_file)
-            print(playlist)
             playlists += "**"+str(index+1)+"**: "+playlist['name']+"\n"
     await ctx.send("**Saved Playlists:** \n"+playlists)
 
