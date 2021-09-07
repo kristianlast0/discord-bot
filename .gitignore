@@ -1,5 +1,6 @@
-tracks
-thumbnails
-playlists
+tracks/
+thumbnails/
+playlists/
 .env
-__pycache__
+__pycache__/
+test.py

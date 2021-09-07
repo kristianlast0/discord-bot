@@ -6,6 +6,7 @@ import random
 from mediahandler import MediaHandler
 import pyttsx3
 import json
+
 load_dotenv()
  
 # Get the API token from the .env file.
@@ -15,7 +16,7 @@ DISCORD_TOKEN = os.getenv("develop_token")
 client = discord.Client()
  
 if DISCORD_TOKEN == os.getenv("discord_token"): bot = commands.Bot(command_prefix='!')
-else: bot = commands.Bot(command_prefix='#')
+else: bot = commands.Bot(command_prefix='$')
  
 mh = MediaHandler()
  
@@ -105,17 +106,33 @@ async def skip(ctx):
         vc.stop()
     else:
         await ctx.send("The bot is not playing anything or has no next track.")
- 
+
+@bot.command(name="pop")
+async def pop(ctx, index):
+    x = mh.pop(index)
+    if not x:
+        await ctx.send("Error!")
+    else:
+        await ctx.send(x["title"] + " : was removed from queue.")
+
+
 @bot.command(name='welcome')
 async def welcome(ctx):
+    from datastore import welcome_messages as wm
     vc = ctx.message.guild.voice_client
-    path = os.getenv("track_path")+'tts-welcome.mp3'
-    engine = pyttsx3.init()
-    engine.save_to_file('Whats up bitches', path)
-    engine.runAndWait()
-    if os.path.isfile(path):
-        source = discord.FFmpegPCMAudio(path)
-        vc.play(source)
+    x = random.choice(list(wm.items()))
+    print(x[0], ">", x[1])
+
+    path = os.getenv("tts_path") + x[0] + ".mp3"
+    if os.path.exists(path) and os.path.isfile(path):
+        print("TTS file exists, playing from disc.")
+        vc.play(discord.FFmpegPCMAudio(path))
+    else:
+        print("TTS does not yet exist, creating!")
+        engine = pyttsx3.init()
+        engine.save_to_file(x[1], path)
+        engine.runAndWait()
+        vc.play(discord.FFmpegPCMAudio(path))
 
 @bot.command(name='back')
 async def back(ctx):
@@ -177,10 +194,19 @@ async def queue(ctx):
  
 @bot.command(name='insult')
 async def insult(ctx):
-    adj = ["absolute", "utter", "incompetent", "hidious", "unbareable", "total", "massive", "useless"]
-    noun = ["cock nosher", "tool", "cretin", "hoop sniffer", "imbecile", "lemming"]
+    from datastore import insult_adj as adj
+    from datastore import insult_noun as noun
     i = "You " + random.choice (adj) + " " + random.choice (noun)
-    await ctx.send("You " + random.choice (adj) + " " + random.choice (noun))
+    await ctx.send(i)
+
+@client.event
+async def on_voice_state_update(member, before, after):
+    if not before.channel and after.channel:
+        role = discord.utils.get(member.guild.roles, name="role name")
+        await member.add_roles(role)
+    elif before.channel and not after.channel:
+        role = discord.utils.get(member.guild.roles, name="role name")
+        await member.remove_roles(role)
  
 @bot.event
 async def on_ready():
