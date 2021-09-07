@@ -5,11 +5,15 @@ from dotenv import load_dotenv
 import random
 from mediahandler import MediaHandler
 import pyttsx3
+import os, json
+import pandas as pd
 import json
+from datetime import datetime
 
 load_dotenv()
  
 # Get the API token from the .env file.
+<<<<<<< HEAD
 
 DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
 bot = commands.Bot(command_prefix='!') if os.getenv("env") == "prod" else commands.Bot(command_prefix=os.getenv("command_prefix"))
@@ -24,6 +28,12 @@ bot = commands.Bot(command_prefix='!') if os.getenv("env") == "prod" else comman
 # else:
 #     bot = commands.Bot(command_prefix=os.getenv("command_prefix")) 
 
+=======
+DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
+
+client = discord.Client()
+bot = commands.Bot(command_prefix='!') if os.getenv("env") == "prod" else commands.Bot(command_prefix=os.getenv("command_prefix")) 
+>>>>>>> master
 mh = MediaHandler()
  
 @bot.command(name='join')
@@ -31,7 +41,7 @@ async def join(ctx):
     if ctx.message.author.voice:
         channel = ctx.message.author.voice.channel
     await channel.connect()
-    #await welcome(ctx)
+    await welcome(ctx)
 
 @bot.command(name='leave')
 async def leave(ctx):
@@ -79,7 +89,10 @@ async def play(ctx, *search):
         added_track = await mh.addTrack(search)
         if mh.currentTrack['completed_at'] is not None and mh.hasNextTrack == True:
             mh.next()
-        await ctx.send(f"Queued: **{added_track['title']}**")
+        msg = await ctx.send(f"Queued: **{added_track['title']}**")
+        # await bot.add_reaction(msg, emoji)
+        reaction = "👍"
+        await msg.add_reaction(emoji=reaction)
         playTrack(ctx, vc, mh.currentTrackIndex)
     elif search == "":
         if mh.stopped == True and not vc.is_playing():
@@ -140,7 +153,7 @@ async def welcome(ctx):
         engine.runAndWait()
         vc.play(discord.FFmpegPCMAudio(path))
 
-@bot.command(name='back')
+@bot.command(name='back', help="asdsdasd")
 async def back(ctx):
     user = ctx.author
     if user.voice is None or user.voice.channel is None: return
@@ -190,7 +203,55 @@ async def stop(ctx):
         await voice_client.stop()
     else:
         await ctx.send("The bot is not playing anything at the moment.")
- 
+
+@bot.command(name='save')
+async def save(ctx, *name):
+    name = (" ").join(name)
+    if name == "":
+        await ctx.send("**Please enter a name for the playlist**")
+        return
+    playlist = { "name": name, "tracks": mh.tracks }
+    with open(os.getenv("playlist_path")+str(datetime.timestamp(datetime.now()))+'.json', 'w') as outfile:
+        json.dump(playlist, outfile)
+        await ctx.send("**Playlist saved!:** \n"+name+" with "+str(len(mh.tracks))+" tracks")
+
+@bot.command(name='playlists')
+async def playlists(ctx):
+    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
+    if len(json_files) == 0:
+        await ctx.send("**You haven't saved any playlists yet:**\nSave the current queue with: !save \{name\}")
+    else:
+        playlists = ""
+        for index, js in enumerate(json_files):
+            with open(os.path.join(os.getenv("playlist_path"), js)) as json_file:
+                playlist = json.load(json_file)
+                playlists += "**"+str(index+1)+"**: "+playlist['name']+"\n"
+        await ctx.send("**Saved Playlists:** \n"+playlists)
+
+@bot.command(name='load')
+async def load(ctx, playlist_index):
+    playlist_index = int(playlist_index)-1
+    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
+    if len(json_files) == 0:
+        await ctx.send("**No playlists saved yet!**")
+    with open(os.getenv("playlist_path")+json_files[playlist_index]) as json_file:
+        playlist = json.load(json_file)
+        user = ctx.author
+        if user.voice is None or user.voice.channel is None: return
+        voice_channel = user.voice.channel
+        if ctx.voice_client is None:
+            vc = await voice_channel.connect()
+        else:
+            await ctx.voice_client.move_to(voice_channel)
+            vc = ctx.voice_client
+        if vc.is_playing(): vc.stop()
+        mh.tracks = []
+        mh.currentTrackIndex = 0
+        for track in playlist['tracks']:
+            await mh.addTrack(track['title'])
+        playTrack(ctx, vc, mh.currentTrackIndex)
+        await ctx.send("**Loaded playlist:** \n"+playlist['name']+" with "+str(len(playlist['tracks']))+" tracks")
+
 @bot.command(name='queue')
 async def queue(ctx):
     trackList = ""
@@ -204,7 +265,31 @@ async def insult(ctx):
     from datastore import insult_noun as noun
     i = "You " + random.choice (adj) + " " + random.choice (noun)
     await ctx.send(i)
+<<<<<<< HEAD
  
+=======
+
+@commands.command(pass_context=True)
+async def emoji(ctx):
+    msg = await bot.say("working")
+    reactions = ['dart']
+    for emoji in reactions: 
+        await bot.add_reaction(msg, emoji)
+
+@client.event
+async def on_reaction_add(reaction, user):
+    print(reaction.message)
+    # if user != client.user:
+        # if str(reaction.emoji) == "➡️":
+        #     #fetch new results from the Spotify API
+        #     newSearchResult = discord.Embed(...)
+        #     await reaction.message.edit(embed=newSearchResult)
+        # if str(reaction.emoji) == "⬅️":
+        #     #fetch new results from the Spotify API
+        #     newSearchResult = discord.Embed(...)
+        #     await reaction.message.edit(embed=newSearchResult)
+
+>>>>>>> master
 @bot.event
 async def on_ready():
     print("Bot is ready!")
