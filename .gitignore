@@ -1,7 +1,7 @@
 tracks/
 thumbnails/
 playlists/
-.env
+./.env
 __pycache__/
 test.py
 backup/
