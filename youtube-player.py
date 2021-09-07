@@ -21,7 +21,7 @@ async def join(ctx):
     if ctx.message.author.voice:
         channel = ctx.message.author.voice.channel
     await channel.connect()
-    await welcome(ctx)
+    #await welcome(ctx)
 
 @bot.command(name='leave')
 async def leave(ctx):
