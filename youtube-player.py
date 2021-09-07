@@ -10,15 +10,20 @@ import json
 load_dotenv()
  
 # Get the API token from the .env file.
-if os.getenv("env") == "prod":
-    DISCORD_TOKEN = os.getenv("discord_token")
-else: DISCORD_TOKEN = os.getenv("develop_token")
 
-client = discord.Client()
-if os.getenv("env") == "prod": 
-    bot = commands.Bot(command_prefix='!')
-else:
-    bot = commands.Bot(command_prefix=os.getenv("command_prefix")) 
+DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
+bot = commands.Bot(command_prefix='!') if os.getenv("env") == "prod" else commands.Bot(command_prefix=os.getenv("command_prefix"))
+
+# if os.getenv("env") == "prod":
+#     DISCORD_TOKEN = os.getenv("discord_token")
+# else: DISCORD_TOKEN = os.getenv("develop_token")
+
+# client = discord.Client()
+# if os.getenv("env") == "prod": 
+#     bot = commands.Bot(command_prefix='!')
+# else:
+#     bot = commands.Bot(command_prefix=os.getenv("command_prefix")) 
+
 mh = MediaHandler()
  
 @bot.command(name='join')
@@ -112,7 +117,7 @@ async def skip(ctx):
 async def pop(ctx, index):
     x = mh.pop(index)
     if not x:
-        await ctx.send("Error!")
+        await ctx.send("Selection out of range.")
     else:
         await ctx.send(x["title"] + " : was removed from queue.")
 
