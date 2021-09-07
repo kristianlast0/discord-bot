@@ -116,7 +116,7 @@ class MediaHandler():
             x = self.tracks[i - 1]
             self.tracks.pop(i - 1)
             if i < self.currentTrackIndex:
-                self.trackIndex -= 1
+                self.currentTrackIndex -= 1
             return(x)
         else:
             return(0)
