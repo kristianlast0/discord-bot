@@ -4,3 +4,4 @@ playlists/
 .env
 __pycache__/
 test.py
+backup/
