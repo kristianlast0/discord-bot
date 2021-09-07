@@ -5,5 +5,5 @@ playlists/
 __pycache__/
 test.py
 backup/
-tts/tts*
+./tts/tts*
 pull.sh
