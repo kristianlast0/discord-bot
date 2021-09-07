@@ -72,7 +72,10 @@ async def play(ctx, *search):
         added_track = await mh.addTrack(search)
         if mh.currentTrack['completed_at'] is not None and mh.hasNextTrack == True:
             mh.next()
-        await ctx.send(f"Queued: **{added_track['title']}**")
+        msg = await ctx.send(f"Queued: **{added_track['title']}**")
+        # await bot.add_reaction(msg, emoji)
+        reaction = "👍"
+        await msg.add_reaction(emoji=reaction)
         playTrack(ctx, vc, mh.currentTrackIndex)
     elif search == "":
         if mh.stopped == True and not vc.is_playing():
@@ -245,7 +248,27 @@ async def insult(ctx):
     from datastore import insult_noun as noun
     i = "You " + random.choice (adj) + " " + random.choice (noun)
     await ctx.send(i)
- 
+
+@commands.command(pass_context=True)
+async def emoji(ctx):
+    msg = await bot.say("working")
+    reactions = ['dart']
+    for emoji in reactions: 
+        await bot.add_reaction(msg, emoji)
+
+@client.event
+async def on_reaction_add(reaction, user):
+    print(reaction.message)
+    # if user != client.user:
+        # if str(reaction.emoji) == "➡️":
+        #     #fetch new results from the Spotify API
+        #     newSearchResult = discord.Embed(...)
+        #     await reaction.message.edit(embed=newSearchResult)
+        # if str(reaction.emoji) == "⬅️":
+        #     #fetch new results from the Spotify API
+        #     newSearchResult = discord.Embed(...)
+        #     await reaction.message.edit(embed=newSearchResult)
+
 @bot.event
 async def on_ready():
     print("Bot is ready!")
