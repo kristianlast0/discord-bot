@@ -257,6 +257,19 @@ async def emoji(ctx):
         await bot.add_reaction(msg, emoji)
 
 @client.event
+async def on_message(reaction, user):
+    print(reaction.message)
+    # if user != client.user:
+        # if str(reaction.emoji) == "➡️":
+        #     #fetch new results from the Spotify API
+        #     newSearchResult = discord.Embed(...)
+        #     await reaction.message.edit(embed=newSearchResult)
+        # if str(reaction.emoji) == "⬅️":
+        #     #fetch new results from the Spotify API
+        #     newSearchResult = discord.Embed(...)
+        #     await reaction.message.edit(embed=newSearchResult)
+
+@client.event
 async def on_reaction_add(reaction, user):
     print(reaction.message)
     # if user != client.user:
