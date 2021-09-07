@@ -133,7 +133,7 @@ async def welcome(ctx):
         engine.runAndWait()
         vc.play(discord.FFmpegPCMAudio(path))
 
-@bot.command(name='back')
+@bot.command(name='back', help="asdsdasd")
 async def back(ctx):
     user = ctx.author
     if user.voice is None or user.voice.channel is None: return
@@ -198,13 +198,15 @@ async def save(ctx, *name):
 @bot.command(name='playlists')
 async def playlists(ctx):
     json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
-    print(json_files)
-    playlists = ""
-    for index, js in enumerate(json_files):
-        with open(os.path.join(os.getenv("playlist_path"), js)) as json_file:
-            playlist = json.load(json_file)
-            playlists += "**"+str(index+1)+"**: "+playlist['name']+"\n"
-    await ctx.send("**Saved Playlists:** \n"+playlists)
+    if len(json_files) == 0:
+        await ctx.send("**You haven't saved any playlists yet:**\nSave the current queue with: !save \{name\}")
+    else:
+        playlists = ""
+        for index, js in enumerate(json_files):
+            with open(os.path.join(os.getenv("playlist_path"), js)) as json_file:
+                playlist = json.load(json_file)
+                playlists += "**"+str(index+1)+"**: "+playlist['name']+"\n"
+        await ctx.send("**Saved Playlists:** \n"+playlists)
 
 @bot.command(name='load')
 async def load(ctx, playlist_index):
@@ -229,7 +231,7 @@ async def load(ctx, playlist_index):
             await mh.addTrack(track['title'])
         playTrack(ctx, vc, mh.currentTrackIndex)
         await ctx.send("**Loaded playlist:** \n"+playlist['name']+" with "+str(len(playlist['tracks']))+" tracks")
- 
+
 @bot.command(name='queue')
 async def queue(ctx):
     trackList = ""
