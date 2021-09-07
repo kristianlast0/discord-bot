@@ -24,7 +24,7 @@ async def join(ctx):
     if ctx.message.author.voice:
         channel = ctx.message.author.voice.channel
     await channel.connect()
-    # await welcome(ctx)
+    await welcome(ctx)
 
 @bot.command(name='leave')
 async def leave(ctx):
@@ -63,7 +63,7 @@ async def play(ctx, *search):
     voice_channel = user.voice.channel
     if ctx.voice_client is None: 
         vc = await voice_channel.connect()
-        # await welcome(ctx)
+        await welcome(ctx)
     else:
         await ctx.voice_client.move_to(voice_channel)
         vc = ctx.voice_client
