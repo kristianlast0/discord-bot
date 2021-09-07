@@ -10,15 +10,18 @@ import json
 load_dotenv()
  
 # Get the API token from the .env file.
-if os.getenv("env") == "prod":
-    DISCORD_TOKEN = os.getenv("discord_token")
-else: DISCORD_TOKEN = os.getenv("develop_token")
+DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
+
+# if os.getenv("env") == "prod":
+#     DISCORD_TOKEN = os.getenv("discord_token")
+# else: DISCORD_TOKEN = os.getenv("develop_token")
 
 client = discord.Client()
-if os.getenv("env") == "prod": 
-    bot = commands.Bot(command_prefix='!')
-else:
-    bot = commands.Bot(command_prefix=os.getenv("command_prefix")) 
+bot = commands.Bot(command_prefix='!') if os.getenv("env") == "prod" else commands.Bot(command_prefix=os.getenv("command_prefix")) 
+# if os.getenv("env") == "prod": 
+#     bot = commands.Bot(command_prefix='!')
+# else:
+#     bot = commands.Bot(command_prefix=os.getenv("command_prefix")) 
 mh = MediaHandler()
  
 @bot.command(name='join')
