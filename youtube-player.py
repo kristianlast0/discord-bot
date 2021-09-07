@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 import random
 from mediahandler import MediaHandler
 import pyttsx3
+import os, json
+import pandas as pd
 import json
 
 load_dotenv()
@@ -12,16 +14,8 @@ load_dotenv()
 # Get the API token from the .env file.
 DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
 
-# if os.getenv("env") == "prod":
-#     DISCORD_TOKEN = os.getenv("discord_token")
-# else: DISCORD_TOKEN = os.getenv("develop_token")
-
 client = discord.Client()
 bot = commands.Bot(command_prefix='!') if os.getenv("env") == "prod" else commands.Bot(command_prefix=os.getenv("command_prefix")) 
-# if os.getenv("env") == "prod": 
-#     bot = commands.Bot(command_prefix='!')
-# else:
-#     bot = commands.Bot(command_prefix=os.getenv("command_prefix")) 
 mh = MediaHandler()
  
 @bot.command(name='join')
@@ -29,7 +23,7 @@ async def join(ctx):
     if ctx.message.author.voice:
         channel = ctx.message.author.voice.channel
     await channel.connect()
-    #await welcome(ctx)
+    # await welcome(ctx)
 
 @bot.command(name='leave')
 async def leave(ctx):
@@ -68,7 +62,7 @@ async def play(ctx, *search):
     voice_channel = user.voice.channel
     if ctx.voice_client is None: 
         vc = await voice_channel.connect()
-        await welcome(ctx)
+        # await welcome(ctx)
     else:
         await ctx.voice_client.move_to(voice_channel)
         vc = ctx.voice_client
@@ -188,6 +182,53 @@ async def stop(ctx):
         await voice_client.stop()
     else:
         await ctx.send("The bot is not playing anything at the moment.")
+
+@bot.command(name='save')
+async def save(ctx, *name):
+    name = (" ").join(name)
+    if name == "":
+        await ctx.send("**Please enter a name for the playlist**")
+        return
+    playlist = { "name": name, "tracks": mh.tracks }
+    with open(os.getenv("playlist_path")+'data.json', 'w') as outfile:
+        json.dump(playlist, outfile)
+        await ctx.send("**Playlist saved!:** \n"+name+" with "+str(len(mh.tracks))+" tracks")
+
+@bot.command(name='playlists')
+async def playlists(ctx):
+    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
+    print(json_files)
+    playlists = ""
+    for index, js in enumerate(json_files):
+        with open(os.path.join(os.getenv("playlist_path"), js)) as json_file:
+            playlist = json.load(json_file)
+            print(playlist)
+            playlists += "**"+str(index+1)+"**: "+playlist['name']+"\n"
+    await ctx.send("**Saved Playlists:** \n"+playlists)
+
+@bot.command(name='load')
+async def load(ctx, playlist_index):
+    playlist_index = int(playlist_index)-1
+    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
+    if len(json_files) == 0:
+        await ctx.send("**No playlists saved yet!**")
+    with open(os.getenv("playlist_path")+json_files[playlist_index]) as json_file:
+        playlist = json.load(json_file)
+        user = ctx.author
+        if user.voice is None or user.voice.channel is None: return
+        voice_channel = user.voice.channel
+        if ctx.voice_client is None:
+            vc = await voice_channel.connect()
+        else:
+            await ctx.voice_client.move_to(voice_channel)
+            vc = ctx.voice_client
+        if vc.is_playing(): vc.stop()
+        mh.tracks = []
+        mh.currentTrackIndex = 0
+        for track in playlist['tracks']:
+            await mh.addTrack(track['title'])
+        playTrack(ctx, vc, mh.currentTrackIndex)
+        await ctx.send("**Loaded playlist:** \n"+playlist['name']+" with "+str(len(playlist['tracks']))+" tracks")
  
 @bot.command(name='queue')
 async def queue(ctx):
@@ -202,15 +243,6 @@ async def insult(ctx):
     from datastore import insult_noun as noun
     i = "You " + random.choice (adj) + " " + random.choice (noun)
     await ctx.send(i)
-
-@client.event
-async def on_voice_state_update(member, before, after):
-    if not before.channel and after.channel:
-        role = discord.utils.get(member.guild.roles, name="role name")
-        await member.add_roles(role)
-    elif before.channel and not after.channel:
-        role = discord.utils.get(member.guild.roles, name="role name")
-        await member.remove_roles(role)
  
 @bot.event
 async def on_ready():
