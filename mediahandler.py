@@ -110,17 +110,6 @@ class MediaHandler():
             self.currentTrackIndex = self.currentTrackIndex-1
             print("currentIndex: "+str(self.currentTrackIndex))
 
-    def pop(self, index):
-        i = int(index)
-        if len(self.tracks) >= i and i >= 0:
-            x = self.tracks[i - 1]
-            self.tracks.pop(i - 1)
-            if i < self.currentTrackIndex:
-                self.trackIndex -= 1
-            return(x)
-        else:
-            return(0)
-
     def flush(self):
         self.tracks = []
         self.currentTrackIndex = 0
