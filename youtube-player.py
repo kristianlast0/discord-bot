@@ -113,23 +113,23 @@ async def skip(ctx):
 
 @bot.command(name="pop", help="Remove a track from queue, use !queue to get track number. Example: !pop 2")
 async def pop(ctx, index):
-    index = int(index)
-    if index > 0 and index <= len(mh.tracks):
-        if index == mh.currentTrackIndex +1:
+    index = int(index) - 1
+    if index >= 0 and index <= len(mh.tracks):
+        if index == mh.currentTrackIndex:
             print("Pop current track")
             voice_client = ctx.message.guild.voice_client
             if voice_client.is_playing():
                 mh.stopped = True
                 voice_client.stop()
-            mh.tracks.pop(index -1)
+            mh.tracks.pop(index)
             await play(ctx)
         if index < mh.currentTrackIndex +1:
             print("popping previos track")
-            mh.tracks.pop(index -1)
+            mh.tracks.pop(index)
             mh.currentTrackIndex -= 1
-        if index > mh.currentTrackIndex +1:
+        if index > mh.currentTrackIndex:
             print("Popping future track")
-            mh.tracks.pop(index -1) 
+            mh.tracks.pop(index) 
     else:
         await ctx.send("Are you fucking with me?")
 
