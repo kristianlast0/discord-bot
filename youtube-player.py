@@ -14,6 +14,7 @@ from datetime import datetime
 load_dotenv()
  
 # Get the API token from the .env file.
+
 DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
 
 client = discord.Client()
@@ -73,7 +74,10 @@ async def play(ctx, *search):
         added_track = await mh.addTrack(search)
         if mh.currentTrack['completed_at'] is not None and mh.hasNextTrack == True:
             mh.next()
-        await ctx.send(f"Queued: **{added_track['title']}**")
+        msg = await ctx.send(f"Queued: **{added_track['title']}**")
+        # await bot.add_reaction(msg, emoji)
+        reaction = "👍"
+        await msg.add_reaction(emoji=reaction)
         playTrack(ctx, vc, mh.currentTrackIndex)
     elif search == "":
         if mh.stopped == True and not vc.is_playing():
@@ -264,7 +268,27 @@ async def insult(ctx):
 async def roll(ctx, roll = 1000):
     from datastore import roll_responses as rr
     await ctx.send(str(ctx.author) + " rolled " + str(random.randint(0, roll)) + str(rr.get(roll, "")))
- 
+
+@commands.command(pass_context=True)
+async def emoji(ctx):
+    msg = await bot.say("working")
+    reactions = ['dart']
+    for emoji in reactions: 
+        await bot.add_reaction(msg, emoji)
+
+@client.event
+async def on_reaction_add(reaction, user):
+    print(reaction.message)
+    # if user != client.user:
+        # if str(reaction.emoji) == "➡️":
+        #     #fetch new results from the Spotify API
+        #     newSearchResult = discord.Embed(...)
+        #     await reaction.message.edit(embed=newSearchResult)
+        # if str(reaction.emoji) == "⬅️":
+        #     #fetch new results from the Spotify API
+        #     newSearchResult = discord.Embed(...)
+        #     await reaction.message.edit(embed=newSearchResult)
+
 @bot.event
 async def on_ready():
     print("Bot is ready!")
