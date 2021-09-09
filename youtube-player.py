@@ -1,3 +1,4 @@
+from logging import currentframe
 import discord
 from discord.ext import commands,tasks
 import os
@@ -5,35 +6,28 @@ from dotenv import load_dotenv
 import random
 from mediahandler import MediaHandler
 import pyttsx3
+import os, json
+import pandas as pd
 import json
+from datetime import datetime
 
 load_dotenv()
  
 # Get the API token from the .env file.
-
 DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
-bot = commands.Bot(command_prefix='!') if os.getenv("env") == "prod" else commands.Bot(command_prefix=os.getenv("command_prefix"))
 
-# if os.getenv("env") == "prod":
-#     DISCORD_TOKEN = os.getenv("discord_token")
-# else: DISCORD_TOKEN = os.getenv("develop_token")
-
-# client = discord.Client()
-# if os.getenv("env") == "prod": 
-#     bot = commands.Bot(command_prefix='!')
-# else:
-#     bot = commands.Bot(command_prefix=os.getenv("command_prefix")) 
-
+client = discord.Client()
+bot = commands.Bot(command_prefix='!') if os.getenv("env") == "prod" else commands.Bot(command_prefix=os.getenv("command_prefix")) 
 mh = MediaHandler()
  
-@bot.command(name='join')
+@bot.command(name='join', category="Media Control", help="Bot will join the channel.")
 async def join(ctx):
     if ctx.message.author.voice:
         channel = ctx.message.author.voice.channel
     await channel.connect()
-    #await welcome(ctx)
+    await welcome(ctx)
 
-@bot.command(name='leave')
+@bot.command(name='leave', help="Force bot to leave channel.")
 async def leave(ctx):
     voice_client = ctx.message.guild.voice_client
     if voice_client.is_connected():
@@ -41,7 +35,7 @@ async def leave(ctx):
     else:
         await ctx.send("The bot is not connected to a voice channel.")
  
-@bot.command(name='flush', help='Flush queue.')
+@bot.command(name='flush', help='Flush queue of all songs.')
 async def flush(ctx):
     mh.flush()
     await ctx.send("Flushing queue.")
@@ -62,7 +56,7 @@ def playTrack(ctx, vc, trackIndex):
         vc.play(source, after=lambda e:onPlayerStopped(ctx, vc, trackIndex))
         mh.stopped = False
 
-@bot.command(name='play')
+@bot.command(name='play', help="Play a song from youtube. Links can be used as well as names of songs. Not providing an argument will just resume playing from current location in playlist.")
 async def play(ctx, *search):
     search = (" ").join(search)
     user = ctx.author
@@ -87,7 +81,7 @@ async def play(ctx, *search):
         if mh.stopped == False and vc.is_paused():
             await vc.resume()
  
-@bot.command(name='pause')
+@bot.command(name='pause', help="Pause song. Use !resume or !play to continue.")
 async def pause(ctx):
     voice_client = ctx.message.guild.voice_client
     if voice_client.is_playing():
@@ -96,7 +90,7 @@ async def pause(ctx):
     else:
         await ctx.send("The bot is not playing anything at the moment.")
  
-@bot.command(name='skip')
+@bot.command(name='skip', help="Skip to next track in queue.")
 async def skip(ctx):
     user = ctx.author
     if user.voice is None or user.voice.channel is None: return
@@ -113,16 +107,29 @@ async def skip(ctx):
     else:
         await ctx.send("The bot is not playing anything or has no next track.")
 
-@bot.command(name="pop")
+@bot.command(name="pop", help="Remove a track from queue, use !queue to get track number. Example: !pop 2")
 async def pop(ctx, index):
-    x = mh.pop(index)
-    if not x:
-        await ctx.send("Selection out of range.")
+    index = int(index)
+    if index > 0 and index <= len(mh.tracks):
+        if index == mh.currentTrackIndex +1:
+            print("Pop current track")
+            voice_client = ctx.message.guild.voice_client
+            if voice_client.is_playing():
+                mh.stopped = True
+                voice_client.stop()
+            mh.tracks.pop(index -1)
+            await play(ctx)
+        if index < mh.currentTrackIndex +1:
+            print("popping previos track")
+            mh.tracks.pop(index -1)
+            mh.currentTrackIndex -= 1
+        if index > mh.currentTrackIndex +1:
+            print("Popping future track")
+            mh.tracks.pop(index -1) 
     else:
-        await ctx.send(x["title"] + " : was removed from queue.")
+        await ctx.send("Are you fucking with me?")
 
-
-@bot.command(name='welcome')
+@bot.command(name='welcome', help="Trigger the bots welcome message.")
 async def welcome(ctx):
     from datastore import welcome_messages as wm
     vc = ctx.message.guild.voice_client
@@ -140,7 +147,7 @@ async def welcome(ctx):
         engine.runAndWait()
         vc.play(discord.FFmpegPCMAudio(path))
 
-@bot.command(name='back')
+@bot.command(name='back', help="Skip backwards through playlist.")
 async def back(ctx):
     user = ctx.author
     if user.voice is None or user.voice.channel is None: return
@@ -157,7 +164,7 @@ async def back(ctx):
     mh.prev()
     playTrack(ctx, vc, mh.currentTrackIndex)
 
-@bot.command(name='restart')
+@bot.command(name='restart', help="Restart queue from start of playlist.")
 async def restart(ctx):
     user = ctx.author
     if user.voice is None or user.voice.channel is None: return
@@ -174,7 +181,7 @@ async def restart(ctx):
     mh.currentTrackIndex = 0
     playTrack(ctx, vc, mh.currentTrackIndex)
  
-@bot.command(name='resume')
+@bot.command(name='resume', help="Resume playing from current location in playlist." )
 async def resume(ctx):
     voice_client = ctx.message.guild.voice_client
     if voice_client.is_paused():
@@ -182,7 +189,7 @@ async def resume(ctx):
     else:
         await ctx.send("The bot was not playing anything before this. Use play command")
  
-@bot.command(name='stop')
+@bot.command(name='stop', help="Stop playing current track.")
 async def stop(ctx):
     mh.stopped = True
     voice_client = ctx.message.guild.voice_client
@@ -190,20 +197,73 @@ async def stop(ctx):
         await voice_client.stop()
     else:
         await ctx.send("The bot is not playing anything at the moment.")
- 
-@bot.command(name='queue')
+
+@bot.command(name='save', help="Save current playlist. Example: !save playlist_name")
+async def save(ctx, *name):
+    name = (" ").join(name)
+    if name == "":
+        await ctx.send("**Please enter a name for the playlist**")
+        return
+    playlist = { "name": name, "tracks": mh.tracks }
+    with open(os.getenv("playlist_path")+str(datetime.timestamp(datetime.now()))+'.json', 'w') as outfile:
+        json.dump(playlist, outfile)
+        await ctx.send("**Playlist saved!:** \n"+name+" with "+str(len(mh.tracks))+" tracks")
+
+@bot.command(name='playlists', help="Show saved playlists.")
+async def playlists(ctx):
+    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
+    if len(json_files) == 0:
+        await ctx.send("**You haven't saved any playlists yet:**\nSave the current queue with: !save \{name\}")
+    else:
+        playlists = ""
+        for index, js in enumerate(json_files):
+            with open(os.path.join(os.getenv("playlist_path"), js)) as json_file:
+                playlist = json.load(json_file)
+                playlists += "**"+str(index+1)+"**: "+playlist['name']+"\n"
+        await ctx.send("**Saved Playlists:** \n"+playlists)
+
+@bot.command(name='load', help="Load a playlist, use !playlist to get playlist number. Example: !load 1")
+async def load(ctx, playlist_index):
+    playlist_index = int(playlist_index)-1
+    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
+    if len(json_files) == 0:
+        await ctx.send("**No playlists saved yet!**")
+    with open(os.getenv("playlist_path")+json_files[playlist_index]) as json_file:
+        playlist = json.load(json_file)
+        user = ctx.author
+        if user.voice is None or user.voice.channel is None: return
+        voice_channel = user.voice.channel
+        if ctx.voice_client is None:
+            vc = await voice_channel.connect()
+        else:
+            await ctx.voice_client.move_to(voice_channel)
+            vc = ctx.voice_client
+        if vc.is_playing(): vc.stop()
+        mh.tracks = []
+        mh.currentTrackIndex = 0
+        for track in playlist['tracks']:
+            await mh.addTrack(track['title'])
+        playTrack(ctx, vc, mh.currentTrackIndex)
+        await ctx.send("**Loaded playlist:** \n"+playlist['name']+" with "+str(len(playlist['tracks']))+" tracks")
+
+@bot.command(name='queue', help="Display queue.")
 async def queue(ctx):
     trackList = ""
     for idx,track in enumerate(mh.queue):
         trackList += "**"+str(idx+1)+": "+("[Playing]** " if mh.currentTrackIndex == idx else "**")+track['title']+"\n"
     await ctx.send("**Media Queue:** \n"+trackList)
  
-@bot.command(name='insult')
+@bot.command(name='insult', help="The bot is an asshole.")
 async def insult(ctx):
     from datastore import insult_adj as adj
     from datastore import insult_noun as noun
     i = "You " + random.choice (adj) + " " + random.choice (noun)
     await ctx.send(i)
+
+@bot.command(name='roll', help="Roll")
+async def roll(ctx, roll = 1000):
+    from datastore import roll_responses as rr
+    await ctx.send(str(ctx.author) + " rolled " + str(random.randint(0, roll)) + str(rr.get(roll, "")))
  
 @bot.event
 async def on_ready():
