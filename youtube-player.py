@@ -12,12 +12,17 @@ import json
 from datetime import datetime
 
 load_dotenv()
+
+intents = discord.Intents.default()
+intents.members = True
+intents.reactions = True
+intents.messages = True
  
 # Get the API token from the .env file.
 
 DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
 
-client = discord.Client()
+client = discord.Client(intents=intents)
 bot = commands.Bot(command_prefix='!') if os.getenv("env") == "prod" else commands.Bot(command_prefix=os.getenv("command_prefix")) 
 mh = MediaHandler()
  
@@ -75,9 +80,9 @@ async def play(ctx, *search):
         if mh.currentTrack['completed_at'] is not None and mh.hasNextTrack == True:
             mh.next()
         msg = await ctx.send(f"Queued: **{added_track['title']}**")
-        # await bot.add_reaction(msg, emoji)
-        reaction = "👍"
-        await msg.add_reaction(emoji=reaction)
+        reactions = ["⬅️", "➡️"]
+        for react in reactions:
+            await msg.add_reaction(emoji=react)
         playTrack(ctx, vc, mh.currentTrackIndex)
     elif search == "":
         if mh.stopped == True and not vc.is_playing():
@@ -255,7 +260,10 @@ async def queue(ctx):
     trackList = ""
     for idx,track in enumerate(mh.queue):
         trackList += "**"+str(idx+1)+": "+("[Playing]** " if mh.currentTrackIndex == idx else "**")+track['title']+"\n"
-    await ctx.send("**Media Queue:** \n"+trackList)
+    msg = await ctx.send("**Media Queue:** \n"+trackList)
+    reactions = ["⬅️", "➡️"]
+    for react in reactions:
+        await msg.add_reaction(emoji=react)
  
 @bot.command(name='insult', help="The bot is an asshole.")
 async def insult(ctx):
@@ -276,31 +284,31 @@ async def emoji(ctx):
     for emoji in reactions: 
         await bot.add_reaction(msg, emoji)
 
-@client.event
-async def on_message(reaction, user):
-    print(reaction.message)
-    # if user != client.user:
-        # if str(reaction.emoji) == "➡️":
-        #     #fetch new results from the Spotify API
-        #     newSearchResult = discord.Embed(...)
-        #     await reaction.message.edit(embed=newSearchResult)
-        # if str(reaction.emoji) == "⬅️":
-        #     #fetch new results from the Spotify API
-        #     newSearchResult = discord.Embed(...)
-        #     await reaction.message.edit(embed=newSearchResult)
+@bot.event
+async def on_message(message):
+    print("on_message event")
+    # Pass command through
+    await bot.process_commands(message)
 
-@client.event
+@bot.event
 async def on_reaction_add(reaction, user):
-    print(reaction.message)
-    # if user != client.user:
-        # if str(reaction.emoji) == "➡️":
-        #     #fetch new results from the Spotify API
-        #     newSearchResult = discord.Embed(...)
-        #     await reaction.message.edit(embed=newSearchResult)
-        # if str(reaction.emoji) == "⬅️":
-        #     #fetch new results from the Spotify API
-        #     newSearchResult = discord.Embed(...)
-        #     await reaction.message.edit(embed=newSearchResult)
+    print("on_reaction_add event")
+    print(user.bot)
+    if not user.bot:
+        ctx = await bot.get_context(reaction.message, cls=commands.Context)
+        if str(reaction.emoji) == "➡️": ctx.command = bot.get_command('skip')
+        if str(reaction.emoji) == "⬅️": ctx.command = bot.get_command('back')
+        await bot.invoke(ctx)
+
+@bot.event
+async def on_reaction_remove(reaction, user):
+    print("on_reaction_remove event")
+    print(user.bot)
+    if not user.bot:
+        ctx = await bot.get_context(reaction.message, cls=commands.Context)
+        if str(reaction.emoji) == "➡️": ctx.command = bot.get_command('skip')
+        if str(reaction.emoji) == "⬅️": ctx.command = bot.get_command('back')
+        await bot.invoke(ctx)
 
 @bot.event
 async def on_ready():

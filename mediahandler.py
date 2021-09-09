@@ -107,6 +107,8 @@ class MediaHandler():
  
     def prev(self):
         if(self.currentTrackIndex > 0 and len(self.tracks) > 0):
+            for track in self.tracks[self.currentTrackIndex:]:
+                track['completed_at'] = None
             self.currentTrackIndex = self.currentTrackIndex-1
             print("currentIndex: "+str(self.currentTrackIndex))
 
