@@ -123,7 +123,7 @@ async def pop(ctx, index):
                 voice_client.stop()
             mh.tracks.pop(index)
             await play(ctx)
-        if index < mh.currentTrackIndex +1:
+        if index < mh.currentTrackIndex:
             print("popping previos track")
             mh.tracks.pop(index)
             mh.currentTrackIndex -= 1
