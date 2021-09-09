@@ -78,7 +78,6 @@ async def play(ctx, *search):
         if mh.currentTrack['completed_at'] is not None and mh.hasNextTrack == True:
             mh.next()
         msg = await ctx.send(f"Queued: **{added_track['title']}**")
-        # await bot.add_reaction(msg, emoji)
         reactions = ["⬅️", "➡️"]
         for react in reactions:
             await msg.add_reaction(emoji=react)
@@ -246,7 +245,10 @@ async def queue(ctx):
     trackList = ""
     for idx,track in enumerate(mh.queue):
         trackList += "**"+str(idx+1)+": "+("[Playing]** " if mh.currentTrackIndex == idx else "**")+track['title']+"\n"
-    await ctx.send("**Media Queue:** \n"+trackList)
+    msg = await ctx.send("**Media Queue:** \n"+trackList)
+    reactions = ["⬅️", "➡️"]
+    for react in reactions:
+        await msg.add_reaction(emoji=react)
  
 @bot.command(name='insult')
 async def insult(ctx):
@@ -265,16 +267,7 @@ async def insult(ctx):
 @bot.event
 async def on_message(message):
     print("on_message event")
-    print(message)
-    # if user != client.user:
-    #     if str(reaction.emoji) == "➡️":
-    #         #fetch new results from the Spotify API
-    #         newSearchResult = discord.Embed(...)
-    #         await reaction.message.edit(embed=newSearchResult)
-    #     if str(reaction.emoji) == "⬅️":
-    #         #fetch new results from the Spotify API
-    #         newSearchResult = discord.Embed(...)
-    #         await reaction.message.edit(embed=newSearchResult)
+    # Pass command through
     await bot.process_commands(message)
 
 @bot.event
