@@ -13,77 +13,75 @@ from datetime import datetime
 
 load_dotenv()
 
-intents = discord.Intents.default()
-intents.members = True
-intents.reactions = True
-intents.messages = True
+# intents = discord.Intents.default()
+# intents.members = True
+# intents.reactions = True
+# intents.messages = True
  
 # Get the API token from the .env file.
 
 DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
 
-#client = discord.Client(intents=intents)
+# client = discord.Client(intents=intents)
 bot = commands.Bot(command_prefix='!') if os.getenv("env") == "prod" else commands.Bot(command_prefix=os.getenv("command_prefix")) 
 guilds = {}
 
 def getguild(ctx):
+    # Check what context: Message,Etc
     id = ctx.message.guild.id
     if id in guilds.keys():
-        print("Guild found!")
+        # print("Guild found!")
         return(guilds.get(id))
     else:
-        d = [ctx.message.guild, MediaHandler, VoiceConnection]
-        print(d)
+        d = {
+            "guild": ctx.message.guild,
+            "media_handler": MediaHandler,
+            "voice_connection": VoiceConnection()
+        }
         guilds[id] = d
-        print("Guild added.")
-        print(guilds)
+        # print("Guild added.")
+        # print(guilds)
         return d
 
 class VoiceConnection():
     def __init__ (self):
-        self.isconnected = False
         self.isplaying = False
         self.vchannel = None
-    
-    async def connect(self, *channel):
-        self.vchannel = await channel.connect()
-        #isconnected = True
-        return(self.vchannel)
+
+    async def getClient(self, ctx):
+        user = ctx.author
+        if ctx.voice_client is None: 
+            return await user.voice.channel.connect()
+        else:
+            await ctx.voice_client.move_to(user.voice.channel)
+            return ctx.voice_client
 
     #async def playfile(self, file)
 
 @bot.command(name='test',help="Play a song from youtube. Links can be used as well as names of songs. Not providing an argument will just resume playing from current location in playlist.")
 async def test(ctx, *search):
-    guild = getguild(ctx)
+
     search = (" ").join(search)
-    user = ctx.author
-    if user.voice is None or user.voice.channel is None:
-        await ctx.send(f"You are not in a voice channel!")
-        return
-    if ctx.voice_client is None:
-        await guild[2].connect(user.voice.channel)
-        #await welcome(ctx)
-    else:
-        await ctx.voice_client.move_to(user.voice.channel)
-        guild[2] = ctx.voice_client
+    guild = getguild(ctx)
+    voice_client = await guild['voice_connection'].getClient(ctx)
 
     if search != "":
         print(search)
-        added_track = await guild[1].addTrackNew(search)
+        added_track = await guild['media_handler'].addTrackNew(search)
         if added_track[0] == None:
-            guild[1].downloader(added_track[1],added_track[2], added_track[3], added_track[4])
-        if guild[1].currentTrack['completed_at'] is not None and guild[1].hasNextTrack == True:
-            guild[1].next()
+            guild['media_handler'].downloader(added_track[1],added_track[2], added_track[3], added_track[4])
+        if guild['media_handler'].currentTrack['completed_at'] is not None and guild['media_handler'].hasNextTrack == True:
+            guild['media_handler'].next()
         msg = await ctx.send(f"Queued: **{added_track['title']}**")
         reactions = ["⬅️", "➡️"]
         for react in reactions:
             await msg.add_reaction(emoji=react)
-        playTrack(ctx, guild[1], guild[1].currentTrackIndex)
+        playTrack(ctx, voice_client, guild['media_handler'].currentTrackIndex)
     elif search == "":
-        if guild[1].stopped == True and not guild[1].is_playing():
-            playTrack(ctx, guild[1], guild[1].currentTrackIndex)
-        if guild[1].stopped == False and guild[1].is_paused():
-            await guild[1].resume()
+        if guild['media_handler'].stopped == True and not guild['media_handler'].is_playing():
+            playTrack(ctx, guild['media_handler'], guild['media_handler'].currentTrackIndex)
+        if guild['media_handler'].stopped == False and voice_client.is_paused():
+            await guild['media_handler'].resume()
 
 ######################################################################################################################################
 
@@ -126,15 +124,8 @@ def playTrack(ctx, vc, trackIndex):
 @bot.command(name='play', help="Play a song from youtube. Links can be used as well as names of songs. Not providing an argument will just resume playing from current location in playlist.")
 async def play(ctx, *search):
     search = (" ").join(search)
-    user = ctx.author
-    if user.voice is None or user.voice.channel is None: return
-    voice_channel = user.voice.channel
-    if ctx.voice_client is None: 
-        vc = await voice_channel.connect()
-        await welcome(ctx)
-    else:
-        await ctx.voice_client.move_to(voice_channel)
-        vc = ctx.voice_client
+    guild = getguild(ctx)
+    vc = await guild['voice_connection'].getClient(ctx)
  
     if search != "":
         added_track = await mh.addTrack(search)
@@ -162,14 +153,8 @@ async def pause(ctx):
  
 @bot.command(name='skip', help="Skip to next track in queue.")
 async def skip(ctx):
-    user = ctx.author
-    if user.voice is None or user.voice.channel is None: return
-    voice_channel = user.voice.channel
-    if ctx.voice_client is None:
-        vc = await voice_channel.connect()
-    else:
-        await ctx.voice_client.move_to(voice_channel)
-        vc = ctx.voice_client
+    guild = getguild(ctx)
+    vc = await guild['voice_connection'].getClient(ctx)
 
     if vc.is_playing() and mh.hasNextTrack == True:
         mh.stopped = False
