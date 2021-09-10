@@ -22,10 +22,71 @@ intents.messages = True
 
 DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
 
-client = discord.Client(intents=intents)
+#client = discord.Client(intents=intents)
 bot = commands.Bot(command_prefix='!') if os.getenv("env") == "prod" else commands.Bot(command_prefix=os.getenv("command_prefix")) 
-mh = MediaHandler()
- 
+guilds = {}
+
+def getguild(ctx):
+    id = ctx.message.guild.id
+    if id in guilds.keys():
+        print("Guild found!")
+        return(guilds.get(id))
+    else:
+        d = [ctx.message.guild, MediaHandler, VoiceConnection]
+        print(d)
+        guilds[id] = d
+        print("Guild added.")
+        print(guilds)
+        return d
+
+class VoiceConnection():
+    def __init__ (self):
+        self.isconnected = False
+        self.isplaying = False
+        self.vchannel = None
+    
+    async def connect(self, *channel):
+        self.vchannel = await channel.connect()
+        #isconnected = True
+        return(self.vchannel)
+
+    #async def playfile(self, file)
+
+@bot.command(name='test',help="Play a song from youtube. Links can be used as well as names of songs. Not providing an argument will just resume playing from current location in playlist.")
+async def test(ctx, *search):
+    guild = getguild(ctx)
+    search = (" ").join(search)
+    user = ctx.author
+    if user.voice is None or user.voice.channel is None:
+        await ctx.send(f"You are not in a voice channel!")
+        return
+    if ctx.voice_client is None:
+        await guild[2].connect(user.voice.channel)
+        #await welcome(ctx)
+    else:
+        await ctx.voice_client.move_to(user.voice.channel)
+        guild[2] = ctx.voice_client
+
+    if search != "":
+        print(search)
+        added_track = await guild[1].addTrackNew(search)
+        if added_track[0] == None:
+            guild[1].downloader(added_track[1],added_track[2], added_track[3], added_track[4])
+        if guild[1].currentTrack['completed_at'] is not None and guild[1].hasNextTrack == True:
+            guild[1].next()
+        msg = await ctx.send(f"Queued: **{added_track['title']}**")
+        reactions = ["⬅️", "➡️"]
+        for react in reactions:
+            await msg.add_reaction(emoji=react)
+        playTrack(ctx, guild[1], guild[1].currentTrackIndex)
+    elif search == "":
+        if guild[1].stopped == True and not guild[1].is_playing():
+            playTrack(ctx, guild[1], guild[1].currentTrackIndex)
+        if guild[1].stopped == False and guild[1].is_paused():
+            await guild[1].resume()
+
+######################################################################################################################################
+
 @bot.command(name='join', category="Media Control", help="Bot will join the channel.")
 async def join(ctx):
     if ctx.message.author.voice:
@@ -134,7 +195,7 @@ async def pop(ctx, index):
             mh.currentTrackIndex -= 1
         if index > mh.currentTrackIndex:
             print("Popping future track")
-            mh.tracks.pop(index) 
+            mh.tracks.pop(index)
     else:
         await ctx.send("Are you fucking with me?")
 

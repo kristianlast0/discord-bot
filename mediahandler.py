@@ -9,18 +9,97 @@ from datetime import datetime
 load_dotenv()
  
 class MediaHandler():
- 
+
     tracks = []
     currentTrackIndex = 0
     bitRate = "128"
     trackPath = ""
     stopped = False
- 
+
     def __init__(self):
-        self.tracks = []
-        self.currentTrackIndex = 0
-        self.trackPath = os.getenv("track_path")
- 
+            self.tracks = []
+            self.tracksNew = [{"type": "queue", "pos": 0, "lastcmd": None}]
+            self.currentTrackIndex = 0
+            self.trackPath = os.getenv("track_path")
+
+    async def addTrackNew(self, *search):
+    
+        query_string = urllib.parse.urlencode({"search_query": search})
+        formatUrl = urllib.request.urlopen("https://www.youtube.com/results?" + query_string)
+        search_results = re.findall(r"watch\?v=(\S{11})", formatUrl.read().decode())
+        clip = requests.get("https://www.youtube.com/watch?v=" + "{}".format(search_results[0]))
+        clip2 = "https://www.youtube.com/watch?v=" + "{}".format(search_results[0])
+
+        inspect = BeautifulSoup(clip.content, "html.parser")
+        yt_title = inspect.find_all("meta", property="og:title")
+        yt_thumbnail = inspect.find_all("meta", property="og:thumnail")
+        # meta = inspect.find_all("contentDetails")
+        # print(meta)
+
+        for metadata in yt_title: pass
+        filename = self.trackPath+re.sub('[^A-Za-z0-9-]+', '', metadata['content']).lower()+".wav"
+
+        if os.path.isfile(filename):
+            # print("--- Found existing file, added to queue")
+            # print('')
+            track = {
+                "filepath": filename,
+                "title": metadata['content'],
+                "thumbnail": '',
+                "added_at": datetime.timestamp(datetime.now()),
+                "started_at": None,
+                "completed_at": None,
+            }
+            self.tracks.append(track)
+            return track
+
+        print("--- Downloading track...")
+        ydl_opts = {
+            'outtmpl': filename,
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'wav',
+                'preferredquality': self.bitRate
+            }],
+            'postprocessor_args': [
+                '-ar', '16000'
+            ],
+            'rate-limit': '20k',
+            'prefer_ffmpeg': True,
+            'keepvideo': False,
+            'quiet': False
+        }
+        return(None, clip2, ydl_opts, filename, metadata)
+
+    async def downloader(self, clip2, ydl_opts, filename, content):
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([clip2])
+            info_dict = ydl.extract_info(clip2, download=False)
+            # video_url = info_dict.get("url", None)
+            # video_id = info_dict.get("id", None)
+            # video_title = info_dict.get('title', None)
+            # print(video_title)
+            # print(video_id)
+            # print(video_url)
+
+            track = {
+                "filepath": filename,
+                "title": metadata['content'],
+                "thumbnail": '',
+                "added_at": datetime.timestamp(datetime.now()),
+                "started_at": None,
+                "completed_at": None,
+                # "duration": metadata['duration']
+            }
+
+            print('--- Download completed')
+            print('')
+            self.tracks.append(track)
+            return track
+
+################################################################################################################################
+
     async def addTrack(self, search):
  
         query_string = urllib.parse.urlencode({"search_query": search})
