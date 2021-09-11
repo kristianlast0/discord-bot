@@ -29,7 +29,7 @@ prefix = "!" if os.getenv("env") == "prod" else os.getenv("command_prefix")
 bot = commands.Bot(command_prefix=prefix)
 guilds = {}
 
-def getguild(ctx):
+def getguild(ctx): # get guild relevant objects in dict form.
     # Check what context: Message,Etc
     id = ctx.message.guild.id
     if id in guilds.keys():
@@ -46,7 +46,7 @@ def getguild(ctx):
         print(guilds)
         return d
 
-def getInfo(search, noplaylist=True):
+def getInfo(search, noplaylist=True): # get all relevant search information in dict form.
     try:
         if not search.startswith("https://youtu"):
             query_string = urllib.parse.urlencode({"search_query": search})
@@ -59,7 +59,7 @@ def getInfo(search, noplaylist=True):
     except:
         return None
 
-def getDURL(link):
+def getDURL(link): # get direct url for video.
     with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':True}) as ydl:
         return(ydl.extract_info(link, download=False)["url"])
 
@@ -74,13 +74,7 @@ class VoiceConnection():
             return await user.voice.channel.connect()
         else:
             await ctx.voice_client.move_to(user.voice.channel)
-            return ctx.voice_client
-
-    #async def playfile(self, file)
-
-def p(voice, path, ):
-    if os.path.exists(path) and os.path.isfile(path):
-        return voice.play(discord.FFmpegPCMAudio(path), after=lambda e:onPlayerStopped())
+            return ctx.voice_clien
 
 @bot.command(name='test')
 async def test(ctx, *search):
