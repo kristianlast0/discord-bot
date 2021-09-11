@@ -10,6 +10,7 @@ import os, json
 import pandas as pd
 import json
 from datetime import datetime
+import youtube_dl
 
 load_dotenv()
 
@@ -23,7 +24,8 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
 
 # client = discord.Client(intents=intents)
-bot = commands.Bot(command_prefix='!') if os.getenv("env") == "prod" else commands.Bot(command_prefix=os.getenv("command_prefix")) 
+prefix = "!" if os.getenv("env") == "prod" else os.getenv("command_prefix")
+bot = commands.Bot(command_prefix=prefix)
 guilds = {}
 
 def getguild(ctx):
@@ -58,12 +60,44 @@ class VoiceConnection():
 
     #async def playfile(self, file)
 
+def p(voice, path):
+    if os.path.exists(path) and os.path.isfile(path):
+        return voice.play(discord.FFmpegPCMAudio(path), after=lambda e:onPlayerStopped())
+
 @bot.command(name='test',help="Play a song from youtube. Links can be used as well as names of songs. Not providing an argument will just resume playing from current location in playlist.")
 async def test(ctx, *search):
 
     search = (" ").join(search)
     guild = getguild(ctx)
-    voice_client = await guild['voice_connection'].getClient(ctx)
+    voice = await guild['voice_connection'].getClient(ctx)
+
+    # e = discord.Embed(title="Ermahgerd",
+    #                   url="https://stackoverflow.com",
+    #                   description="lorem ipsum dolor sumit",
+    # color=discord.Color.green())
+    # e.set_thumbnail(url="https://i.imgur.com/ddx8Bpg.png")
+    # await ctx.send(embed=e)
+
+    FFMPEG_OPTIONS = {
+        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+        'options': '-vn'
+    }
+    YDL_OPTIONS = {
+        'format': 'bestaudio/best',
+        'noplaylist':'True'
+    }   
+
+    # voice = get(client.voice_clients, guild=ctx.guild)
+    with youtube_dl.YoutubeDL(YDL_OPTIONS) as ydl:
+        info = ydl.extract_info(search, download=False)
+        I_URL = info['formats'][0]['url']
+        source = await discord.FFmpegOpusAudio.from_probe(I_URL, **FFMPEG_OPTIONS)
+        voice.play(source)
+        voice.is_playing()
+        print("asdasd")
+
+
+    return
 
     if search != "":
         print(search)
@@ -115,31 +149,41 @@ def onPlayerStopped(ctx, vc, lastTrackIndex):
             playTrack(ctx, vc, mh.currentTrackIndex)
 
 def playTrack(ctx, vc, trackIndex):
+    guild = getguild(ctx)
     if not vc.is_playing():
-        mh.startTrack(trackIndex)
-        source = discord.FFmpegPCMAudio(mh.currentTrack['filepath'])
-        vc.play(source, after=lambda e:onPlayerStopped(ctx, vc, trackIndex))
-        mh.stopped = False
+        guild['media_handler'].startTrack(trackIndex)
+        source = discord.FFmpegPCMAudio(guild['media_handler'].currentTrack['filepath'])
+        vc.play(source, after=lambda e:r())
+        # guild['media_handler'].stopped = False
+
+def r():
+    print('stopped')
+    return True
 
 @bot.command(name='play', help="Play a song from youtube. Links can be used as well as names of songs. Not providing an argument will just resume playing from current location in playlist.")
 async def play(ctx, *search):
     search = (" ").join(search)
     guild = getguild(ctx)
     vc = await guild['voice_connection'].getClient(ctx)
+
+    print(search)
+    print(search)
+    print(search)
  
     if search != "":
-        added_track = await mh.addTrack(search)
-        if mh.currentTrack['completed_at'] is not None and mh.hasNextTrack == True:
-            mh.next()
+        print(search)
+        added_track = await guild['media_handler'].addTrack(guild['media_handler'], search)
+        if guild['media_handler'].currentTrack['completed_at'] is not None and guild['media_handler'].hasNextTrack == True:
+            guild['media_handler'].next()
         msg = await ctx.send(f"Queued: **{added_track['title']}**")
         reactions = ["⬅️", "➡️"]
         for react in reactions:
             await msg.add_reaction(emoji=react)
-        playTrack(ctx, vc, mh.currentTrackIndex)
+        playTrack(ctx, vc, guild['media_handler'].currentTrackIndex)
     elif search == "":
-        if mh.stopped == True and not vc.is_playing():
-            playTrack(ctx, vc, mh.currentTrackIndex)
-        if mh.stopped == False and vc.is_paused():
+        if guild['media_handler'].stopped == True and not vc.is_playing():
+            playTrack(ctx, vc, guild['media_handler'].currentTrackIndex)
+        if guild['media_handler'].stopped == False and vc.is_paused():
             await vc.resume()
  
 @bot.command(name='pause', help="Pause song. Use !resume or !play to continue.")
@@ -333,6 +377,17 @@ async def emoji(ctx):
 @bot.event
 async def on_message(message):
     print("on_message event")
+    print(message.content)
+    if message.content.startswith(prefix+'test'):
+        params = message.content.split(" ")
+        if params[1] is not None and ".youtube." not in params[1]:
+            e = discord.Embed(title=params[1], url="https://youtube.com", description="Manual youtube embed from searched text", color=discord.Color.green())
+            e.set_thumbnail(url="https://cdn.mos.cms.futurecdn.net/8gzcr6RpGStvZFA2qRt4v6.jpg")
+            ctx = await bot.get_context(message, cls=commands.Context)
+            await ctx.send(embed=e)
+
+    return 
+
     # Pass command through
     await bot.process_commands(message)
 
