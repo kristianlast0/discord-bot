@@ -11,6 +11,7 @@ import pandas as pd
 import json
 from datetime import datetime
 import youtube_dl
+import re, requests, urllib.parse, urllib.request
 
 load_dotenv()
 
@@ -32,7 +33,7 @@ def getguild(ctx):
     # Check what context: Message,Etc
     id = ctx.message.guild.id
     if id in guilds.keys():
-        # print("Guild found!")
+        print("Guild found!")
         return(guilds.get(id))
     else:
         d = {
@@ -41,9 +42,26 @@ def getguild(ctx):
             "voice_connection": VoiceConnection()
         }
         guilds[id] = d
-        # print("Guild added.")
-        # print(guilds)
+        print("Guild added.")
+        print(guilds)
         return d
+
+def getInfo(search, noplaylist=True):
+    try:
+        if not search.startswith("https://youtu"):
+            query_string = urllib.parse.urlencode({"search_query": search})
+            formatUrl = urllib.request.urlopen("https://www.youtube.com/results?" + query_string)
+            search_results = re.findall(r"watch\?v=(\S{11})", formatUrl.read().decode())
+            search = "https://www.youtube.com/watch?v=" + "{}".format(search_results[0])
+        with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':noplaylist}) as ydl:
+            info = ydl.extract_info(search, download=False)
+            return({"title":info["title"], "link":search, "duration":info["duration"], "format": info["formats"][0]})
+    except:
+        return None
+
+def getDURL(link):
+    with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':True}) as ydl:
+        return(ydl.extract_info(link, download=False)["url"])
 
 class VoiceConnection():
     def __init__ (self):
@@ -60,44 +78,28 @@ class VoiceConnection():
 
     #async def playfile(self, file)
 
-def p(voice, path):
+def p(voice, path, ):
     if os.path.exists(path) and os.path.isfile(path):
         return voice.play(discord.FFmpegPCMAudio(path), after=lambda e:onPlayerStopped())
 
-@bot.command(name='test',help="Play a song from youtube. Links can be used as well as names of songs. Not providing an argument will just resume playing from current location in playlist.")
+@bot.command(name='test')
 async def test(ctx, *search):
 
     search = (" ").join(search)
     guild = getguild(ctx)
     voice = await guild['voice_connection'].getClient(ctx)
 
-    # e = discord.Embed(title="Ermahgerd",
-    #                   url="https://stackoverflow.com",
-    #                   description="lorem ipsum dolor sumit",
-    # color=discord.Color.green())
-    # e.set_thumbnail(url="https://i.imgur.com/ddx8Bpg.png")
-    # await ctx.send(embed=e)
-
-    FFMPEG_OPTIONS = {
-        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-        'options': '-vn'
-    }
-    YDL_OPTIONS = {
-        'format': 'bestaudio/best',
-        'noplaylist':'True'
-    }   
-
-    # voice = get(client.voice_clients, guild=ctx.guild)
-    with youtube_dl.YoutubeDL(YDL_OPTIONS) as ydl:
-        info = ydl.extract_info(search, download=False)
-        I_URL = info['formats'][0]['url']
-        source = await discord.FFmpegOpusAudio.from_probe(I_URL, **FFMPEG_OPTIONS)
-        voice.play(source)
-        voice.is_playing()
-        print("asdasd")
-
-
-    return
+    i = getInfo(search)
+    if i != None:
+        guild["media_handler"].addTrackNew(guild["media_handler"], i)
+    else:
+        await ctx.send(f"Failed to find result!")
+        return
+#### Below here is trash.
+    try:
+        voice.play(await discord.FFmpegOpusAudio.from_probe(getDURL(i["link"])))
+    except:
+        pass
 
     if search != "":
         print(search)
@@ -136,11 +138,15 @@ async def leave(ctx):
  
 @bot.command(name='flush', help='Flush queue of all songs.')
 async def flush(ctx):
+    guild = getguild(ctx)
+    voice = await guild['voice_connection'].getClient(ctx)
     mh.flush()
     await ctx.send("Flushing queue.")
     print("Flushing queue.")
 
 def onPlayerStopped(ctx, vc, lastTrackIndex):
+    guild = getguild(ctx)
+    voice = guild['voice_connection'].getClient(ctx)
     print("onPlayerStopped")
     if mh.stopped == False:
         mh.endTrack(lastTrackIndex)
@@ -385,10 +391,6 @@ async def on_message(message):
             e.set_thumbnail(url="https://cdn.mos.cms.futurecdn.net/8gzcr6RpGStvZFA2qRt4v6.jpg")
             ctx = await bot.get_context(message, cls=commands.Context)
             await ctx.send(embed=e)
-
-    return 
-
-    # Pass command through
     await bot.process_commands(message)
 
 @bot.event
