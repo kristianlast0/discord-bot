@@ -35,6 +35,7 @@ class MediaHandler():
                 "format": i["format"]
             }
         self.tracksNew.append(track)
+        print(self.tracksNew)
         return track
         
 ################################################################################################################################

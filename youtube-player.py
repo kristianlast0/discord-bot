@@ -5,6 +5,7 @@ import os
 from dotenv import load_dotenv
 import random
 from mediahandler import MediaHandler
+from voiceconnection import VoiceConnection
 import pyttsx3
 import os, json
 import pandas as pd
@@ -39,7 +40,7 @@ def getguild(ctx): # get guild relevant objects in dict form.
         d = {
             "guild": ctx.message.guild,
             "media_handler": MediaHandler,
-            "voice_connection": VoiceConnection()
+            "voice_connection": VoiceConnection
         }
         guilds[id] = d
         print("Guild added.")
@@ -63,37 +64,23 @@ def getDURL(link): # get direct url for video.
     with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':True}) as ydl:
         return(ydl.extract_info(link, download=False)["url"])
 
-class VoiceConnection():
-    def __init__ (self):
-        self.isplaying = False
-        self.vchannel = None
-
-    async def getClient(self, ctx):
-        user = ctx.author
-        if ctx.voice_client is None: 
-            return await user.voice.channel.connect()
-        else:
-            await ctx.voice_client.move_to(user.voice.channel)
-            return ctx.voice_clien
-
 @bot.command(name='test')
 async def test(ctx, *search):
-
-    search = (" ").join(search)
     guild = getguild(ctx)
-    voice = await guild['voice_connection'].getClient(ctx)
-
-    i = getInfo(search)
+    voice = guild["voice_connection"]
+    i = getInfo((" ").join(search))
     if i != None:
-        guild["media_handler"].addTrackNew(guild["media_handler"], i)
+        voice.mh.addTrackNew(voice.mh, i)
     else:
         await ctx.send(f"Failed to find result!")
         return
-#### Below here is trash.
-    try:
-        voice.play(await discord.FFmpegOpusAudio.from_probe(getDURL(i["link"])))
-    except:
-        pass
+    #try:
+    await voice.playOpus(voice, ctx, getDURL(i["link"]))
+    #print("Is playing:"+client.is_playing())
+    return
+    #except:
+    print("playOpus Failed.")
+    return
 
     if search != "":
         print(search)
