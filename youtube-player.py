@@ -39,66 +39,46 @@ def getguild(ctx): # get guild relevant objects in dict form.
     else:
         d = {
             "guild": ctx.message.guild,
-            "media_handler": MediaHandler,
             "voice_connection": VoiceConnection
         }
         guilds[id] = d
         print("Guild added.")
-        print(guilds)
+        #print(guilds)
         return d
-
-def getInfo(search, noplaylist=True): # get all relevant search information in dict form.
-    try:
-        if not search.startswith("https://youtu"):
-            query_string = urllib.parse.urlencode({"search_query": search})
-            formatUrl = urllib.request.urlopen("https://www.youtube.com/results?" + query_string)
-            search_results = re.findall(r"watch\?v=(\S{11})", formatUrl.read().decode())
-            search = "https://www.youtube.com/watch?v=" + "{}".format(search_results[0])
-        with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':noplaylist}) as ydl:
-            info = ydl.extract_info(search, download=False)
-            return({"title":info["title"], "link":search, "duration":info["duration"], "format": info["formats"][0]})
-    except:
-        return None
-
-def getDURL(link): # get direct url for video.
-    with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':True}) as ydl:
-        return(ydl.extract_info(link, download=False)["url"])
 
 @bot.command(name='test')
 async def test(ctx, *search):
     guild = getguild(ctx)
     voice = guild["voice_connection"]
-    i = getInfo((" ").join(search))
-    if i != None:
-        voice.mh.addTrackNew(voice.mh, i)
-    else:
-        await ctx.send(f"Failed to find result!")
-        return
-    #try:
-    await voice.playOpus(voice, ctx, getDURL(i["link"]))
-    #print("Is playing:"+client.is_playing())
-    return
-    #except:
-    print("playOpus Failed.")
-    return
+    client =  await voice.getClient(voice, ctx)
 
     if search != "":
-        print(search)
-        added_track = await guild['media_handler'].addTrackNew(search)
-        if added_track[0] == None:
-            guild['media_handler'].downloader(added_track[1],added_track[2], added_track[3], added_track[4])
-        if guild['media_handler'].currentTrack['completed_at'] is not None and guild['media_handler'].hasNextTrack == True:
-            guild['media_handler'].next()
-        msg = await ctx.send(f"Queued: **{added_track['title']}**")
-        reactions = ["⬅️", "➡️"]
-        for react in reactions:
-            await msg.add_reaction(emoji=react)
-        playTrack(ctx, voice_client, guild['media_handler'].currentTrackIndex)
-    elif search == "":
-        if guild['media_handler'].stopped == True and not guild['media_handler'].is_playing():
-            playTrack(ctx, guild['media_handler'], guild['media_handler'].currentTrackIndex)
-        if guild['media_handler'].stopped == False and voice_client.is_paused():
-            await guild['media_handler'].resume()
+        if client == None:
+            await ctx.send(f"Unable to connect to channel. Are you connected to a voice channel?")
+            return
+        i = voice.mh.getInfo((" ").join(search))
+        if i != None:
+            voice.mh.addTrackNew(voice.mh, i)
+        else:
+            await ctx.send(f"Failed to find result!")
+            return
+        if not voice.client.is_playing():
+            await voice.playQueueOpus(voice, ctx)
+            print("Is playing:" + str(voice.client.is_playing()))
+        return
+    else:
+        if voice.stopped:
+            pass
+        return
+
+@bot.command(name='stopn', help="Stop playing current track.")
+async def stopn(ctx):
+    guild = getguild(ctx)
+    voice = guild["voice_connection"]
+    if voice.client.is_playing():
+        voice.stop(voice)
+    else:
+        await ctx.send("The bot is not playing anything at the moment.")
 
 ######################################################################################################################################
 
