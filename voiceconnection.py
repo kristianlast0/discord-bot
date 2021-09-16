@@ -54,7 +54,3 @@ class VoiceConnection:
         else:
             await ctx.send("The bot is not playing anything at the moment.")
         return
-
-    async def flush(self):
-        await self.stop()
-        self.mh.flush()         

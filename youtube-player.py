@@ -189,7 +189,8 @@ async def flush(ctx):
     g, v, c = await auth(ctx)
     if not c:
         return
-    await v.flush()
+    await v.stop()
+    await v.mh.flush()
     await ctx.send("**Flushing Queue**")
     return
 
