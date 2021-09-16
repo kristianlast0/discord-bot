@@ -10,56 +10,51 @@ class VoiceConnection:
         self.stopped = True
 
     async def getClient(self, ctx):
-        #try:
-        user = ctx.author.voice.channel
-        #except:
-            #return None
+        try:
+            user = ctx.author.voice.channel
+        except:
+            return None
         if ctx.voice_client is None:
             self.client = await user.connect()
             return self.client
         else:
             #self.client = await ctx.voice_client.move_to(user.voice.channel)
             return self.client
-    
-    async def disconnect(ctx):
-        return
 
     async def playQueue(self, ctx, opus = True):
-        if self.mh.getTrackIndex() == 0:
-            self.mh.setTrackIndex()
         if opus: encoder = discord.FFmpegOpusAudio.from_probe
         else: encoder = discord.FFmpegPCMAudio
         self.stopped = False
         while not self.stopped:
-            print("Loop")
-            msg = await ctx.send("[Playing:]** " + self.mh.getCurrentName())
+            msg = await ctx.send("**[Playing:]** " + self.mh.getCurrentName())
             await msg.add_reaction(emoji="📜")
             source = await encoder(self.mh.getCurrentDURL())
-            #try:
-            await ctx.voice_client.play(source, after=lambda e:self.EOA())
-            while ctx.voice_client.is_playing():
+            await self.client.play(source)
+            while self.client.is_playing():
                 await sleep(1)
             if not self.stopped(self):
                 if self.mh.getTrackIndex() == self.mh.incTrackIndex():
                     self.stopped = True
-                    return ctx.voice_client
-            #except:
-             #   print("playQueue tried to loop into playing track. This needs to be fixed.")
         return self.client
 
     async def stop(self):
         self.stopped = True
-        self.client.stop()
+        if self.client.is_playing():
+            self.client.stop()
 
-    def EOA(self):
-        # if self.mh.getTrackIndex(self.mh) == self.mh.incTrackIndex(self.mh):
-        #     self.stopped = True
-        #     try :
-        #         self.client.stop()
-        #     except:
-        #         pass
-        # print(self.mh.getTrackIndex(self.mh))
+    async def playpause(self, ctx):
+        if self.client.is_playing():
+            await self.client.pause()
+            await ctx.send("Music paused.")
+        elif self.client.is_paused():
+            await self.client.resume()
+            await ctx.send("Music unpaused.")
+        elif self.stopped:
+            await self.playQueue(ctx)
+        else:
+            await ctx.send("The bot is not playing anything at the moment.")
         return
 
-        
-            
+    async def flush(self):
+        await self.stop()
+        self.mh.flush()         

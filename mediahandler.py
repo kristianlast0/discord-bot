@@ -37,15 +37,14 @@ class MediaHandler:
             #return None
 
     def getTrackIndex(self):
+        if self.tracksNew[0]["pos"] == 0:
+            self.tracksNew[0]["pos"] = 1
         return self.tracksNew[0]["pos"]
 
     def setTrackIndex(self, i = 1):
         if i > 0 and i < len(self.tracksNew):
             self.tracksNew[0]["pos"] = i
         return i
-        # elif i > 0 and len(self.tracksNew) == 1:
-        #     self.tracksNew[0]["pos"] = 1
-        #     return 1
 
     def incTrackIndex(self):
         if len(self.tracksNew) - 1 > self.getTrackIndex():
@@ -67,7 +66,7 @@ class MediaHandler:
     def getCurrentName(self):
         return(self.tracksNew[self.getTrackIndex()]["title"])
 
-    def addTrackNew(self, i):
+    def addTrack(self, i):
         track = {
                 "title": i["title"],
                 "thumbnail": '',
@@ -81,15 +80,18 @@ class MediaHandler:
         self.tracksNew.append(track)
         #print(self.tracksNew)
         return track
-        
+    
+    def flush(self):
+        self.tracksNew = [{"type": "queue", "pos": 0}]
+
     #@property
-    def queueNew(self):
+    def queue(self):
         if len(self.tracksNew) == 1: return []
         return self.tracksNew
 
 ################################################################################################################################
 
-    async def addTrack(self, search):
+    async def addTrackOld(self, search):
  
         query_string = urllib.parse.urlencode({"search_query": search})
         formatUrl = urllib.request.urlopen("https://www.youtube.com/results?" + query_string)
@@ -180,9 +182,9 @@ class MediaHandler:
             self.currentTrackIndex = self.currentTrackIndex-1
             print("currentIndex: "+str(self.currentTrackIndex))
 
-    def flush(self):
-        self.tracks = []
-        self.currentTrackIndex = 0
+    # def flush(self):
+    #     self.tracks = []
+    #     self.currentTrackIndex = 0
  
     def loadPlaylist(self, index):
         print(index)
@@ -195,10 +197,10 @@ class MediaHandler:
     def endTrack(self, index):
         self.tracks[index]['completed_at'] = datetime.timestamp(datetime.now())
  
-    @property
-    def queue(self):
-        if len(self.tracks) == 0: return []
-        return self.tracks
+    # @property
+    # def queue(self):
+    #     if len(self.tracks) == 0: return []
+    #     return self.tracks
  
     @property
     def hasNextTrack(self):

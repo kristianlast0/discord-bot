@@ -48,23 +48,29 @@ def getguild(ctx): # get guild relevant objects in dict form.
         print("Cannot get guild from this context.")
         return None
 
+async def auth(ctx, ignoreClient = False):
+    g = getguild(ctx)
+    v = g["voice_connection"]
+    c =  await v.getClient(ctx)
+    if not ignoreClient:
+        if c == None:
+            await ctx.send(f"Unable to connect to channel. Are you connected to a voice channel?") 
+            return
+    return([g, v, c])
+
 async def reactions(msg, type = "full"):
     for react in ["⏯️", "⏹️", "⏮️", "⏭️", "🔄", "⏏️", "❌", "📜"]:
         await msg.add_reaction(emoji=react)
 
 @bot.command(name='play')
 async def play(ctx, *search):
-    g = getguild(ctx)
-    v = g["voice_connection"]
-    c =  await v.getClient(ctx)
-    if c == None:
-        await ctx.send(f"Unable to connect to channel. Are you connected to a voice channel?") 
+    g, v, c = await auth(ctx)
+    if not c:
         return
-
     if search != "":
         i = v.mh.getInfo((" ").join(search))
         if i != None:
-            v.mh.addTrackNew(i)
+            v.mh.addTrack(i)
         else:
             await ctx.send(f"Failed to find result!")
             return
@@ -77,15 +83,19 @@ async def play(ctx, *search):
             await v.playQueue(ctx)
         return
 
+@bot.command(name='playpause')
+async def playpause(ctx):
+    g, v, c = await auth(ctx)
+    if not c:
+        return
+    await v.playpause(ctx)
+    return
+
 @bot.command(name='stop', help="Stop playing current track.")
 async def stop(ctx):
-    g = getguild(ctx)
-    v = g["voice_connection"]
-    c =  await v.getClient(ctx)
-    if c == None:
-        await ctx.send(f"Unable to connect to channel. Are you connected to a voice channel?") 
+    g, v, c = await auth(ctx)
+    if not c:
         return
-
     if c.is_playing():
         await v.stop()
         msg = await ctx.send("**[Stopped]**")
@@ -96,49 +106,38 @@ async def stop(ctx):
 
 @bot.command(name='skip', help="Skip to next track in queue.")
 async def skip(ctx):
-    g = getguild(ctx)
-    v = g["voice_connection"]
-    c =  await v.getClient(ctx)
-    if c == None:
-        await ctx.send(f"Unable to connect to channel. Are you connected to a voice channel?") 
+    g, v, c = await auth(ctx)
+    if not c:
         return
-    
-    if c.is_playing():
-        await v.stop()
+    await v.stop()
     v.mh.incTrackIndex()
     await v.playQueue(ctx)
     return
 
 @bot.command(name='back', help="Skip backwards through playlist.")
 async def back(ctx):
-    g = getguild(ctx)
-    v = g["voice_connection"]
-    c =  await v.getClient(ctx)
-    if c == None:
-        await ctx.send(f"Unable to connect to channel. Are you connected to a voice channel?") 
+    g, v, c = await auth(ctx)
+    if not c:
         return
-
-    if c.is_playing():
-        await v.stop()
+    await v.stop()
     v.mh.decTrackIndex()
     await v.playQueue(ctx)
+    return
 
 @bot.command(name='queue', help="Display queue.")
 async def queue(ctx):
-    g = getguild(ctx)
-    v = g["voice_connection"]
-    
+    g, v, c = await auth(ctx, True)
     trackList = ""
-    for idx,track in enumerate(v.mh.queueNew()):
+    for idx,track in enumerate(v.mh.queue()):
         if idx > 0:
             trackList += "**"+str(idx)+": "+("[Playing]** " if v.mh.getTrackIndex() == idx else "**")+track['title']+"\n"
     msg = await ctx.send("**Media Queue:** \n"+trackList)
     await reactions(msg)
+    return
 
 @bot.command(name='save', help="Save current playlist. Example: !save playlist_name")
 async def save(ctx, *name):
-    g = getguild(ctx)
-    v = g["voice_connection"]
+    g, v, c = await auth(ctx, True)
     name = (" ").join(name)
     if name == "":
         await ctx.send("**Please enter a name for the playlist**")
@@ -147,14 +146,12 @@ async def save(ctx, *name):
     with open(os.getenv("playlist_path")+str(datetime.timestamp(datetime.now()))+'.json', 'w') as outfile:
         json.dump(playlist, outfile)
         await ctx.send("**Playlist saved!:** \n"+name+" with "+str(len(mh.tracks))+" tracks")
+    return
 
 @bot.command(name='load', help="Load a playlist, use !playlist to get playlist number. Example: !load 1")
 async def load(ctx, playlist_index):
-    g = getguild(ctx)
-    v = g["voice_connection"]
-    c =  await v.getClient(ctx)
-    if c == None:
-        await ctx.send(f"Unable to connect to channel. Are you connected to a voice channel?") 
+    g, v, c = await auth(ctx)
+    if not c:
         return
     playlist_index = int(playlist_index)-1
     json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
@@ -170,26 +167,38 @@ async def load(ctx, playlist_index):
             await mh.addTrack(track['title'])
         playTrack(ctx, vc, mh.currentTrackIndex)
         await ctx.send("**Loaded playlist:** \n"+playlist['name']+" with "+str(len(playlist['tracks']))+" tracks")
+    return
 
+@bot.command(name='flush', help='Flush queue of all songs.')
+async def flush(ctx):
+    g, v, c = await auth(ctx)
+    if not c:
+        return
+    await v.flush()
+    await ctx.send("**Flushing Queue**")
+    return
 
 @bot.command(name='join', category="Media Control", help="Bot will join the channel.")
 async def join(ctx):
-    g = getguild(ctx)
-    v = g["voice_connection"]
-    c =  await v.getClient(ctx)
-    if c == None:
-        await ctx.send(f"Unable to connect to channel. Are you connected to a voice channel?") 
+    g, v, c = await auth(ctx)
+    if not c:
         return
     msg = await ctx.send("Lets Go!")
     await reactions(msg)
+    return
 
 @bot.command(name='leave', help="Force bot to leave channel.")
 async def leave(ctx):
+    g, v, c = await auth(ctx)
+    if not c:
+        return
     voice_client = ctx.message.guild.voice_client
     if voice_client.is_connected():
+        await v.stop()
         await voice_client.disconnect()
     else:
         await ctx.send("The bot is not connected to a voice channel.")
+    return
 
 @bot.command(name='roll', help="Roll")
 async def roll(ctx, roll = 1000):
@@ -201,7 +210,7 @@ async def roll(ctx, roll = 1000):
 async def emoji(ctx):
     msg = await bot.say("working")
     reactions = ['dart']
-    for emoji in reactions: 
+    for emoji in reactions:
         await bot.add_reaction(msg, emoji)
 
 @bot.event
@@ -223,7 +232,7 @@ async def on_reaction_add(reaction, user):
     print(user.bot)
     if not user.bot: # ⏯️ ⏹️ ⏮️ ⏭️ 🔄 📜 ⏏️ ⤴️ ⤵️ 🎲
         ctx = await bot.get_context(reaction.message, cls=commands.Context)
-        if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('play')
+        if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('playpause')
         if str(reaction.emoji) == "⏹️": ctx.command = bot.get_command('stop')
         if str(reaction.emoji) == "⏭️": ctx.command = bot.get_command('skip')
         if str(reaction.emoji) == "⏮️": ctx.command = bot.get_command('back')
@@ -239,7 +248,7 @@ async def on_reaction_remove(reaction, user):
     print(user.bot)
     if not user.bot:
         ctx = await bot.get_context(reaction.message, cls=commands.Context)
-        if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('play')
+        if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('playpause')
         if str(reaction.emoji) == "⏹️": ctx.command = bot.get_command('stop')
         if str(reaction.emoji) == "⏭️": ctx.command = bot.get_command('skip')
         if str(reaction.emoji) == "⏮️": ctx.command = bot.get_command('back')
