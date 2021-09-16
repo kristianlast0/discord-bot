@@ -38,7 +38,7 @@ def getguild(ctx): # get guild relevant objects in dict form.
         else:
             d = {
                 "guild": ctx.message.guild,
-                "voice_connection": VoiceConnection()
+                "voice_connection": VoiceConnection("128")
             }
             guilds[id] = d
             print("Guild added.")
@@ -58,11 +58,16 @@ async def auth(ctx, ignoreClient = False):
             return
     return([g, v, c])
 
-async def reactions(msg, type = "full"):
-    for react in ["⏯️", "⏹️", "⏮️", "⏭️", "🔄", "⏏️", "❌", "📜"]:
+async def reactions(msg, t = "full"):
+    if t == "hiddenmenu":
+        r = ["🔄", "⏏️", "❌"]
+    elif t == "full":
+        r = ["⏯️", "⏹️", "⏮️", "⏭️", "📜", "💀"]
+    for react in r:
         await msg.add_reaction(emoji=react)
+    
 
-@bot.command(name='play')
+@bot.command(name='play', help="▶️:Add and play tracks.")
 async def play(ctx, *search):
     g, v, c = await auth(ctx)
     if not c:
@@ -83,7 +88,7 @@ async def play(ctx, *search):
             await v.playQueue(ctx)
         return
 
-@bot.command(name='playpause')
+@bot.command(name='playpause', help="⏯️:Play/Resume and Pause")
 async def playpause(ctx):
     g, v, c = await auth(ctx)
     if not c:
@@ -91,7 +96,7 @@ async def playpause(ctx):
     await v.playpause(ctx)
     return
 
-@bot.command(name='stop', help="Stop playing current track.")
+@bot.command(name='stop', help="⏹️:Stop playing current track.")
 async def stop(ctx):
     g, v, c = await auth(ctx)
     if not c:
@@ -104,7 +109,7 @@ async def stop(ctx):
     await reactions(msg)
     return
 
-@bot.command(name='skip', help="Skip to next track in queue.")
+@bot.command(name='skip', help="⏭️:Skip to next track in queue.")
 async def skip(ctx):
     g, v, c = await auth(ctx)
     if not c:
@@ -114,7 +119,7 @@ async def skip(ctx):
     await v.playQueue(ctx)
     return
 
-@bot.command(name='back', help="Skip backwards through playlist.")
+@bot.command(name='back', help="⏮️:Skip backwards through playlist.")
 async def back(ctx):
     g, v, c = await auth(ctx)
     if not c:
@@ -124,7 +129,17 @@ async def back(ctx):
     await v.playQueue(ctx)
     return
 
-@bot.command(name='queue', help="Display queue.")
+@bot.command(name='restart', help="⏮️:Skip backwards through playlist.")
+async def restart(ctx):
+    g, v, c = await auth(ctx)
+    if not c:
+        return
+    await v.stop()
+    v.mh.setTrackIndex(1)
+    await v.mh.playQueue(ctx)
+    return
+
+@bot.command(name='queue', help="📜:Display Queue.")
 async def queue(ctx):
     g, v, c = await auth(ctx, True)
     trackList = ""
@@ -135,7 +150,7 @@ async def queue(ctx):
     await reactions(msg)
     return
 
-@bot.command(name='save', help="Save current playlist. Example: !save playlist_name")
+@bot.command(name='save', help="Save current playlist")
 async def save(ctx, *name):
     g, v, c = await auth(ctx, True)
     name = (" ").join(name)
@@ -148,7 +163,7 @@ async def save(ctx, *name):
         await ctx.send("**Playlist saved!:** \n"+name+" with "+str(len(mh.tracks))+" tracks")
     return
 
-@bot.command(name='load', help="Load a playlist, use !playlist to get playlist number. Example: !load 1")
+@bot.command(name='load', help="Load a playlist. Example: !load 1")
 async def load(ctx, playlist_index):
     g, v, c = await auth(ctx)
     if not c:
@@ -169,7 +184,7 @@ async def load(ctx, playlist_index):
         await ctx.send("**Loaded playlist:** \n"+playlist['name']+" with "+str(len(playlist['tracks']))+" tracks")
     return
 
-@bot.command(name='flush', help='Flush queue of all songs.')
+@bot.command(name='flush', help='⏏️:Flush queue of all songs.')
 async def flush(ctx):
     g, v, c = await auth(ctx)
     if not c:
@@ -187,7 +202,7 @@ async def join(ctx):
     await reactions(msg)
     return
 
-@bot.command(name='leave', help="Force bot to leave channel.")
+@bot.command(name='leave', help="❌:Force bot to leave channel.")
 async def leave(ctx):
     g, v, c = await auth(ctx)
     if not c:
@@ -200,11 +215,16 @@ async def leave(ctx):
         await ctx.send("The bot is not connected to a voice channel.")
     return
 
+@bot.command(name='hiddenmenu', help="💀")
+async def hiddenmenu(ctx):
+    from datastore import roll_responses as rr
+    msg = await ctx.send("Hidden Menu")
+    await reactions(msg, "hiddenmenu")
+
 @bot.command(name='roll', help="Roll")
 async def roll(ctx, roll = 1000):
     from datastore import roll_responses as rr
     msg = await ctx.send(str(ctx.author) + " rolled " + str(random.randint(0, roll)) + str(rr.get(roll, "")))
-    #await msg.add_reaction(emoji="🎲")
 
 @commands.command(pass_context=True)
 async def emoji(ctx):
@@ -230,7 +250,7 @@ async def on_message(message):
 async def on_reaction_add(reaction, user):
     print("on_reaction_add event")
     print(user.bot)
-    if not user.bot: # ⏯️ ⏹️ ⏮️ ⏭️ 🔄 📜 ⏏️ ⤴️ ⤵️ 🎲
+    if not user.bot: # ⏯️ ⏹️ ⏮️ ⏭️ 🔄 📜 ⏏️ ⤴️ ⤵️ 🎲 💀
         ctx = await bot.get_context(reaction.message, cls=commands.Context)
         if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('playpause')
         if str(reaction.emoji) == "⏹️": ctx.command = bot.get_command('stop')
@@ -238,8 +258,9 @@ async def on_reaction_add(reaction, user):
         if str(reaction.emoji) == "⏮️": ctx.command = bot.get_command('back')
         if str(reaction.emoji) == "📜": ctx.command = bot.get_command('queue')
         if str(reaction.emoji) == "❌": ctx.command = bot.get_command('leave')
+        if str(reaction.emoji) == "🔄": ctx.command = bot.get_command('restart')
         if str(reaction.emoji) == "⏏️": ctx.command = bot.get_command('flush')
-        #if str(reaction.emoji) == "🎲": ctx.command = bot.get_command('roll')
+        if str(reaction.emoji) == "💀": ctx.command = bot.get_command('hiddenmenu')
         await bot.invoke(ctx)
 
 @bot.event
@@ -254,8 +275,9 @@ async def on_reaction_remove(reaction, user):
         if str(reaction.emoji) == "⏮️": ctx.command = bot.get_command('back')
         if str(reaction.emoji) == "📜": ctx.command = bot.get_command('queue')
         if str(reaction.emoji) == "❌": ctx.command = bot.get_command('leave')
+        if str(reaction.emoji) == "🔄": ctx.command = bot.get_command('restart')
         if str(reaction.emoji) == "⏏️": ctx.command = bot.get_command('flush')
-        #if str(reaction.emoji) == "🎲": ctx.command = bot.get_command('roll')
+        if str(reaction.emoji) == "💀": ctx.command = bot.get_command('hiddenmenu')
         await bot.invoke(ctx)
 
 @bot.event

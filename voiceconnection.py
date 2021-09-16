@@ -4,8 +4,8 @@ from asyncio import sleep
 
 class VoiceConnection:
 
-    def __init__ (self):
-        self.mh = MediaHandler()
+    def __init__ (self, bitRate):
+        self.mh = MediaHandler(bitRate)
         self.client = None
         self.stopped = True
 
@@ -28,7 +28,7 @@ class VoiceConnection:
         while not self.stopped:
             msg = await ctx.send("**[Playing:]** " + self.mh.getCurrentName())
             await msg.add_reaction(emoji="📜")
-            source = await encoder(self.mh.getCurrentDURL())
+            source = await encoder(self.mh.getCurrentSource())
             await self.client.play(source)
             while self.client.is_playing():
                 await sleep(1)
