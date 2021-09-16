@@ -8,7 +8,7 @@ from datetime import datetime
  
 load_dotenv()
  
-class MediaHandler():
+class MediaHandler:
 
     tracks = []
     tracksNew = []
@@ -16,32 +16,56 @@ class MediaHandler():
     bitRate = "128"
     trackPath = ""
     stopped = False
-    tracksNew = [{"type": "queue", "pos": 0}]
     
     def __init__(self):
         self.tracks = []
+        self.tracksNew = [{"type": "queue", "pos": 0}]
         self.currentTrackIndex = 0
         self.trackPath = os.getenv("track_path")
 
-    def getInfo(search, noplaylist=True): # get all relevant search information in dict form.
-        try:
-            if not search.startswith("https://youtu"):
-                query_string = urllib.parse.urlencode({"search_query": search})
-                formatUrl = urllib.request.urlopen("https://www.youtube.com/results?" + query_string)
-                search_results = re.findall(r"watch\?v=(\S{11})", formatUrl.read().decode())
-                search = "https://www.youtube.com/watch?v=" + "{}".format(search_results[0])
-            with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':noplaylist}) as ydl:
-                info = ydl.extract_info(search, download=False)
-                return({"title":info["title"], "link":search, "duration":info["duration"]})
-        except:
-            return None
+    def getInfo(self, search, noplaylist=True): # get all relevant search information in dict form.
+        #try:
+        if not search.startswith("https://youtu"):
+            query_string = urllib.parse.urlencode({"search_query": search})
+            formatUrl = urllib.request.urlopen("https://www.youtube.com/results?" + query_string)
+            search_results = re.findall(r"watch\?v=(\S{11})", formatUrl.read().decode())
+            search = "https://www.youtube.com/watch?v=" + "{}".format(search_results[0])
+        with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':noplaylist}) as ydl:
+            info = ydl.extract_info(search, download=False)
+            return({"title":info["title"], "link":search, "duration":info["duration"]})
+        #except:
+            #return None
 
-    def getDURL(link): # get direct url for video.
+    def getTrackIndex(self):
+        return self.tracksNew[0]["pos"]
+
+    def setTrackIndex(self, i = 1):
+        if i > 0 and i < len(self.tracksNew):
+            self.tracksNew[0]["pos"] = i
+        return i
+        # elif i > 0 and len(self.tracksNew) == 1:
+        #     self.tracksNew[0]["pos"] = 1
+        #     return 1
+
+    def incTrackIndex(self):
+        if len(self.tracksNew) - 1 > self.getTrackIndex():
+            self.tracksNew[0]["pos"] += 1
+        return(self.getTrackIndex())
+
+    def decTrackIndex(self):
+        if self.getTrackIndex() > 1:
+            self.tracksNew[0]["pos"] -= 1
+        return(self.getTrackIndex())
+
+    def getDURL(self, link): # get direct url for video.
         with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':True}) as ydl:
             return(ydl.extract_info(link, download=False)["url"])
 
     def getCurrentDURL(self):
-        return(self.getDURL(self.tracksNew[self.tracksNew[0]["pos"]]["link"]))
+        return(self.getDURL(self.tracksNew[self.getTrackIndex()]["link"]))
+
+    def getCurrentName(self):
+        return(self.tracksNew[self.getTrackIndex()]["title"])
 
     def addTrackNew(self, i):
         track = {
@@ -52,11 +76,17 @@ class MediaHandler():
                 "completed_at": None,
                 "duration": i["duration"],
                 "link": i["link"],
+                "file": None
             }
         self.tracksNew.append(track)
         #print(self.tracksNew)
         return track
         
+    #@property
+    def queueNew(self):
+        if len(self.tracksNew) == 1: return []
+        return self.tracksNew
+
 ################################################################################################################################
 
     async def addTrack(self, search):

@@ -2,18 +2,19 @@ from mediahandler import MediaHandler
 import discord
 from asyncio import sleep
 
-class VoiceConnection():
-    mh = MediaHandler
-    client = None
-    stopped = True
+class VoiceConnection:
+
     def __init__ (self):
-        pass
+        self.mh = MediaHandler()
+        self.client = None
+        self.stopped = True
 
     async def getClient(self, ctx):
+        #try:
         user = ctx.author.voice.channel
-        #print(user)
-        if user == None: return None
-        if ctx.voice_client is None: 
+        #except:
+            #return None
+        if ctx.voice_client is None:
             self.client = await user.connect()
             return self.client
         else:
@@ -23,40 +24,42 @@ class VoiceConnection():
     async def disconnect(ctx):
         return
 
-    async def playPCM(self, ctx):
-        if self.mh.tracksNew[0]["pos"] == 0:
-            self.mh.tracksNew[0]["pos"] = 1
-        self.stopped = False
-        while not self.stopped:
-            source = discord.FFmpegPCMAudio(DURL)
-            await ctx.voice_client.play(source, after=lambda e:self.EOA(self))
-            self.client = ctx.voice_client
-        return self.client
-
-    async def playQueueOpus(self, ctx):
-        if self.mh.tracksNew[0]["pos"] == 0:
-            self.mh.tracksNew[0]["pos"] = 1
+    async def playQueue(self, ctx, opus = True):
+        if self.mh.getTrackIndex() == 0:
+            self.mh.setTrackIndex()
+        if opus: encoder = discord.FFmpegOpusAudio.from_probe
+        else: encoder = discord.FFmpegPCMAudio
         self.stopped = False
         while not self.stopped:
             print("Loop")
-            source = await discord.FFmpegOpusAudio.from_probe(self.mh.getCurrentDURL(self.mh))
-            ctx.voice_client.play(source, after=lambda e:self.EOA(self))
-            self.client = ctx.voice_client
-            while self.client.is_playing():
+            msg = await ctx.send("[Playing:]** " + self.mh.getCurrentName())
+            await msg.add_reaction(emoji="📜")
+            source = await encoder(self.mh.getCurrentDURL())
+            #try:
+            await ctx.voice_client.play(source, after=lambda e:self.EOA())
+            while ctx.voice_client.is_playing():
                 await sleep(1)
+            if not self.stopped(self):
+                if self.mh.getTrackIndex() == self.mh.incTrackIndex():
+                    self.stopped = True
+                    return ctx.voice_client
+            #except:
+             #   print("playQueue tried to loop into playing track. This needs to be fixed.")
         return self.client
 
-    def stop(self):
+    async def stop(self):
         self.stopped = True
         self.client.stop()
 
     def EOA(self):
-        if not self.stopped and len(self.mh.tracksNew) - 1 > self.mh.tracksNew[0]["pos"]:
-            self.mh.tracksNew[0]["pos"] += 1
-            print("New track available: "+str(self.mh.tracksNew[0]["pos"]))
-            return
-        else :
-            self.stopped = True
-            print("No track available! "+str(self.mh.tracksNew[0]["pos"]))
+        # if self.mh.getTrackIndex(self.mh) == self.mh.incTrackIndex(self.mh):
+        #     self.stopped = True
+        #     try :
+        #         self.client.stop()
+        #     except:
+        #         pass
+        # print(self.mh.getTrackIndex(self.mh))
+        return
+
         
             
