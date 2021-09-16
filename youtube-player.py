@@ -136,7 +136,7 @@ async def restart(ctx):
         return
     await v.stop()
     v.mh.setTrackIndex(1)
-    await v.mh.playQueue(ctx)
+    await v.playQueue(ctx)
     return
 
 @bot.command(name='queue', help="📜:Display Queue.")
