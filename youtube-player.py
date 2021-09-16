@@ -76,12 +76,12 @@ async def play(ctx, *search):
         i = v.mh.getInfo((" ").join(search))
         if i != None:
             v.mh.addTrack(i)
+            await ctx.send("Queued: "+i["title"])
         else:
             await ctx.send(f"Failed to find result!")
             return
         if not c.is_playing():
             await v.playQueue(ctx)
-            print("Is playing:" + str(c.is_playing()))
         return
     else:
         if v.stopped:
@@ -93,7 +93,7 @@ async def playpause(ctx):
     g, v, c = await auth(ctx)
     if not c:
         return
-    await v.playpause(ctx)
+    await v.playPause(ctx)
     return
 
 @bot.command(name='stop', help="⏹️:Stop playing current track.")
@@ -190,7 +190,7 @@ async def flush(ctx):
     if not c:
         return
     await v.stop()
-    await v.mh.flush()
+    v.mh.flush()
     await ctx.send("**Flushing Queue**")
     return
 
@@ -251,7 +251,7 @@ async def on_message(message):
 async def on_reaction_add(reaction, user):
     print("on_reaction_add event")
     print(user.bot)
-    if not user.bot: # ⏯️ ⏹️ ⏮️ ⏭️ 🔄 📜 ⏏️ ⤴️ ⤵️ 🎲 💀
+    if not user.bot: # ⏯️ ⏹️ ⏮️ ⏭️ 🔄 📜 ⏏️ ⤴️ ⤵️ 🎲 💀 👍
         ctx = await bot.get_context(reaction.message, cls=commands.Context)
         if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('playpause')
         if str(reaction.emoji) == "⏹️": ctx.command = bot.get_command('stop')

@@ -16,16 +16,20 @@ class MediaHandler:
         self.trackPath = os.getenv("track_path")
 
     def getInfo(self, search, noplaylist=True): # get all relevant search information in dict form.
-        try:
-            if not search.startswith("https://youtu"):
-                query_string = urllib.parse.urlencode({"search_query": search})
-                formatUrl = urllib.request.urlopen("https://www.youtube.com/results?" + query_string)
-                search_results = re.findall(r"watch\?v=(\S{11})", formatUrl.read().decode())
-                search = "https://www.youtube.com/watch?v=" + "{}".format(search_results[0])
-            with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':noplaylist}) as ydl:
-                info = ydl.extract_info(search, download=False)
-                return({"title":info["title"], "link":search, "duration":info["duration"]})
-        except:
+        #try:
+        if not search.startswith("https://youtu"):
+            query_string = urllib.parse.urlencode({"search_query": search})
+            formatUrl = urllib.request.urlopen("https://www.youtube.com/results?" + query_string)
+            search_results = re.findall(r"watch\?v=(\S{11})", formatUrl.read().decode())
+            search = "https://www.youtube.com/watch?v=" + "{}".format(search_results[0])
+        with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':noplaylist}) as ydl:
+            info = ydl.extract_info(search, download=False)
+            i = {"title":info["title"], "link":search, "duration":info["duration"], "is_live":info["is_live"], "file": None}
+            print("Is Live? "+str(i["is_live"]))
+            if not i["is_live"]:
+                i["file"] = self.getFile(i["title"], search)
+            return(i)
+        #except:
             return None
 
     def getTrackIndex(self):
@@ -53,13 +57,42 @@ class MediaHandler:
             return(ydl.extract_info(link, download=False)["url"])
 
     def getCurrentSource(self):
-        #if self.getDURL(self.tracks[self.getTrackIndex()]["file"]) == None:
-        return(self.getDURL(self.tracks[self.getTrackIndex()]["link"]))
-        #else:
-            #return(self.tracks[self.getTrackIndex()]["file"])
+        if self.tracks[self.getTrackIndex()]["is_live"]:
+            print("Live streaming!")
+            return(self.getDURL(self.tracks[self.getTrackIndex()]["link"]))
+        else:
+            print("File based route!")
+            return(self.tracks[self.getTrackIndex()]["file"])
+            #return(self.getDURL(self.tracks[self.getTrackIndex()]["link"]))
 
     def getCurrentName(self):
         return(self.tracks[self.getTrackIndex()]["title"])
+
+    def getFile(self, name, search):
+        f = re.sub('[^A-Za-z0-9-]+', '', name).lower()+".wav"
+        filename = self.trackPath + f
+        if os.path.isfile(filename):
+            return filename
+        ydl_opts = {
+            'outtmpl': filename,
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'wav',
+                'preferredquality': self.bitRate
+            }],
+            'postprocessor_args': [
+                '-ar', '16000'
+            ],
+            'rate-limit': '20k',
+            'prefer_ffmpeg': True,
+            'keepvideo': False,
+            'quiet': False
+        }
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            print("Downloading track: " + search)
+            ydl.download(search)
+        return filename
 
     def addTrack(self, i):
         track = {
@@ -70,7 +103,8 @@ class MediaHandler:
                 "completed_at": None,
                 "duration": i["duration"],
                 "link": i["link"],
-                "file": None
+                "file": i["file"],
+                "is_live": i["is_live"]
             }
         self.tracks.append(track)
         return track

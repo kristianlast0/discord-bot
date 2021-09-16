@@ -28,11 +28,12 @@ class VoiceConnection:
         while not self.stopped:
             msg = await ctx.send("**[Playing:]** " + self.mh.getCurrentName())
             await msg.add_reaction(emoji="📜")
+            await msg.add_reaction(emoji="👍")
             source = await encoder(self.mh.getCurrentSource())
-            await self.client.play(source)
+            self.client.play(source)
             while self.client.is_playing():
                 await sleep(1)
-            if not self.stopped(self):
+            if not self.stopped:
                 if self.mh.getTrackIndex() == self.mh.incTrackIndex():
                     self.stopped = True
         return self.client
@@ -42,7 +43,7 @@ class VoiceConnection:
         if self.client.is_playing():
             self.client.stop()
 
-    async def playpause(self, ctx):
+    async def playPause(self, ctx):
         if self.client.is_playing():
             await self.client.pause()
             await ctx.send("Music paused.")
