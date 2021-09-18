@@ -5,6 +5,7 @@ import re, requests, urllib.parse, urllib.request
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from datetime import datetime
+import asyncio
  
 load_dotenv()
  
@@ -73,10 +74,14 @@ class MediaHandler:
         filename = self.trackPath + f
         if os.path.isfile(filename):
             return filename
-        await self.downloader(search, filename)
+        #try:
+        task = asyncio.wait_for(await self.downloader(search, filename), 10)
+        #except RuntimeError:
+            #print("Download Finished")
         return filename
 
     async def downloader(self, search, filename):
+        print("Download Started.")
         ydl_opts = {
             'outtmpl': filename,
             'format': 'bestaudio/best',
@@ -88,13 +93,15 @@ class MediaHandler:
             'postprocessor_args': [
                 '-ar', '16000'
             ],
-            'rate-limit': '20k',
+            'ratelimit': int(os.getenv("ratelimit")),
             'prefer_ffmpeg': True,
             'keepvideo': False,
             'quiet': False
         }
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             ydl.download([search])
+        print("Download Finished.")
+        return
 
     def addTrack(self, i):
         track = {

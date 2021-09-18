@@ -25,29 +25,30 @@ class VoiceConnection:
         return
 
     async def playQueue(self, ctx, opus = True):
+        if opus: encoder = discord.FFmpegOpusAudio.from_probe
+        else: encoder = discord.FFmpegPCMAudio
+        is_playing = False
         self.stopped = False
+
+        def r():
+            is_playing = False
+
         while not self.stopped:
-            if opus: encoder = discord.FFmpegOpusAudio.from_probe
-            else: encoder = discord.FFmpegPCMAudio
             msg = await ctx.send("**[Playing:]** " + self.mh.getCurrentName())
             await msg.add_reaction(emoji="📜")
             #await msg.add_reaction(emoji="👍")
             source = await encoder(self.mh.getCurrentSource())
-            self.client.play(source)
-            print("Playing source. Entering while is_playing loop")
-            while self.client.is_playing() or self.client.is_paused():
-                await sleep(1)
-            #self.client.stop()
-            print("Exit is_playing loop")
-            if not self.stopped:
-                print("Not stopped triggered")
-                if self.mh.getTrackIndex() == self.mh.incTrackIndex():
-                    print("Last track triggered")
-                    self.stop()
-            else:
-                print("Stopped triggered")
-            print("End of while not stopped loop")
-        print("End of function")
+            is_playing = True
+            try:
+                self.client.play(source, after=lambda e:r())
+                while is_playing:
+                    await sleep(1)
+                if not self.stopped:
+                    if self.mh.getTrackIndex() == self.mh.incTrackIndex():
+                        self.stop()
+            except:
+                print("Failed to play.")
+                is_playing = False
         return self.client
 
     def stop(self):
@@ -67,6 +68,34 @@ class VoiceConnection:
         else:
             await ctx.send("The bot is not playing anything at the moment.")
         return
+
+    # async def playQueueOld(self, ctx, opus = True):
+    #     self.stopped = False
+    #     if opus: encoder = discord.FFmpegOpusAudio.from_probe
+    #     else: encoder = discord.FFmpegPCMAudio
+    #     while not self.stopped:
+    #         while self.client.is_playing() or self.client.is_paused():
+    #             await sleep(1)
+    #         msg = await ctx.send("**[Playing:]** " + self.mh.getCurrentName())
+    #         await msg.add_reaction(emoji="📜")
+    #         #await msg.add_reaction(emoji="👍")
+    #         source = await encoder(self.mh.getCurrentSource())
+    #         self.client.play(source)
+    #         print("Playing source. Entering while is_playing loop")
+    #         while self.client.is_playing() or self.client.is_paused():
+    #             await sleep(1)
+    #         #self.client.stop()
+    #         print("Exit is_playing loop")
+    #         if not self.stopped:
+    #             print("Not stopped triggered")
+    #             if self.mh.getTrackIndex() == self.mh.incTrackIndex():
+    #                 print("Last track triggered")
+    #                 self.stop()
+    #         else:
+    #             print("Stopped triggered")
+    #         print("End of while not stopped loop")
+    #     print("End of function")
+    #     return self.client
 
     # async def getClient(self, ctx):
         #     try:

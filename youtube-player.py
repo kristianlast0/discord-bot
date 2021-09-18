@@ -145,7 +145,7 @@ async def queue(ctx):
             trackList += "**"+str(idx)+": "+("[Playing]** " if v.mh.getTrackIndex() == idx else "**")+track['title']+"\n"
     msg = await ctx.send("**Media Queue:** \n"+trackList)
     await reactions(msg)
-    print(v.mh.tracks)
+    #print(v.mh.tracks)
     return
 
 @bot.command(name='playlists', help="Show saved playlists.")
@@ -302,10 +302,6 @@ while True:
         break
     except ValueError:
         print("Shit just went south. Restarting.")
-
-if __name__ == "__main__" :
-    bot.run(DISCORD_TOKEN)
-
 
 ######################################################################################################################################
 
