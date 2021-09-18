@@ -12,10 +12,11 @@ class MediaHandler:
     
     def __init__(self, bitRate):
         self.bitRate = bitRate
+        self.download = os.getenv("download")
         self.tracks = [{"type": "queue", "pos": 0}]
         self.trackPath = os.getenv("track_path")
 
-    def getInfo(self, search, noplaylist=True): # get all relevant search information in dict form.
+    async def getInfo(self, search, noplaylist=True): # get all relevant search information in dict form.
         #try:
         if not search.startswith("https://youtu"):
             query_string = urllib.parse.urlencode({"search_query": search})
@@ -26,8 +27,8 @@ class MediaHandler:
             info = ydl.extract_info(search, download=False)
             i = {"title":info["title"], "link":search, "duration":info["duration"], "is_live":info["is_live"], "file": None}
             print("Is Live? "+str(i["is_live"]))
-            if not i["is_live"]:
-                i["file"] = self.getFile(i["title"], search)
+            if not i["is_live"] and self.download:
+                i["file"] = await self.getFile(i["title"], search)
             return(i)
         #except:
             return None
@@ -57,22 +58,25 @@ class MediaHandler:
             return(ydl.extract_info(link, download=False)["url"])
 
     def getCurrentSource(self):
-        if self.tracks[self.getTrackIndex()]["is_live"]:
-            print("Live streaming!")
+        if self.tracks[self.getTrackIndex()]["is_live"] or not self.download:
+            print("Streaming Audio!")
             return(self.getDURL(self.tracks[self.getTrackIndex()]["link"]))
         else:
             print("File based route!")
             return(self.tracks[self.getTrackIndex()]["file"])
-            #return(self.getDURL(self.tracks[self.getTrackIndex()]["link"]))
 
     def getCurrentName(self):
         return(self.tracks[self.getTrackIndex()]["title"])
 
-    def getFile(self, name, search):
+    async def getFile(self, name, search):
         f = re.sub('[^A-Za-z0-9-]+', '', name).lower()+".wav"
         filename = self.trackPath + f
         if os.path.isfile(filename):
             return filename
+        await self.downloader(search, filename)
+        return filename
+
+    async def downloader(self, search, filename):
         ydl_opts = {
             'outtmpl': filename,
             'format': 'bestaudio/best',
@@ -90,9 +94,7 @@ class MediaHandler:
             'quiet': False
         }
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            print("Downloading track: " + search)
-            ydl.download(search)
-        return filename
+            ydl.download([search])
 
     def addTrack(self, i):
         track = {
