@@ -58,7 +58,7 @@ class VoiceConnection:
         self.stopped = True
         if self.client.is_playing():
             self.client.stop()
-        await sleep(1)
+        await sleep(1) # Increase for stability.
 
     async def playPause(self, ctx):
         if self.client.is_playing():
