@@ -26,9 +26,9 @@ class MediaHandler:
             search = "https://www.youtube.com/watch?v=" + "{}".format(search_results[0])
         with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':noplaylist}) as ydl:
             info = ydl.extract_info(search, download=False)
-            i = {"title":info["title"], "link":search, "duration":info["duration"], "is_live":info["is_live"], "file": None}
+            i = {"title":info["title"],"link":search, "duration":info["duration"], "is_live":info["is_live"]}
             print("Is Live? "+str(i["is_live"]))
-            if not i["is_live"] and self.download:
+            if not i["is_live"] and self.download and int(i["duration"]) < 600:
                 async with ctx.typing():
                     await self.getFile(i["title"], i["link"])
             return(i)
@@ -58,7 +58,7 @@ class MediaHandler:
             return(ydl.extract_info(link, download=False)["url"])
 
     async def getSource(self, ctx):
-        if self.tracks[self.getTrackIndex()]["is_live"] or not self.download:
+        if self.tracks[self.getTrackIndex()]["is_live"] or not self.download or int(self.tracks[self.getTrackIndex()]["duration"]) > 600:
             print("Streaming Audio!")
             return(self.getDURL(self.tracks[self.getTrackIndex()]["link"]))
         else:
@@ -114,7 +114,6 @@ class MediaHandler:
                 "completed_at": None,
                 "duration": i["duration"],
                 "link": i["link"],
-                "file": i["file"],
                 "is_live": i["is_live"]
             }
         self.tracks.append(track)

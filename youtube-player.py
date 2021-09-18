@@ -99,7 +99,8 @@ async def stop(ctx):
     if not c:
         return
     if c.is_playing():
-        await v.stop()
+        async with ctx.typing():
+            await v.stop()
         msg = await ctx.send("**[Stopped]**")
     else:
         msg = await ctx.send("The bot is not playing anything at the moment.")
@@ -111,7 +112,8 @@ async def skip(ctx):
     g, v, c = await auth(ctx)
     if not c:
         return
-    await v.stop()
+    async with ctx.typing():
+        await v.stop()
     v.mh.incTrackIndex()
     await v.playQueue(ctx)
     return
@@ -121,7 +123,8 @@ async def back(ctx):
     g, v, c = await auth(ctx)
     if not c:
         return
-    await v.stop()
+    async with ctx.typing():
+        await v.stop()
     v.mh.decTrackIndex()
     await v.playQueue(ctx)
     return
@@ -131,7 +134,8 @@ async def restart(ctx):
     g, v, c = await auth(ctx)
     if not c:
         return
-    await v.stop()
+    async with ctx.typing():
+        await v.stop()
     v.mh.setTrackIndex(1)
     await v.playQueue(ctx)
     return
@@ -186,7 +190,9 @@ async def load(ctx, playlist_index):
     with open(os.getenv("playlist_path")+json_files[playlist_index]) as json_file:
         playlist = json.load(json_file)
         user = ctx.author
-        if c.is_playing(): await v.stop()
+        if c.is_playing(): 
+            async with ctx.typing():
+                await v.stop()
         v.mh.tracks = []
         v.mh.setTrackIndex = 0
         v.mh.tracks = playlist['tracks']
@@ -199,7 +205,8 @@ async def flush(ctx):
     g, v, c = await auth(ctx)
     if not c:
         return
-    await v.stop()
+    async with ctx.typing():
+        await v.stop()
     v.mh.flush()
     await ctx.send("**Flushing Queue**")
     return
@@ -279,6 +286,7 @@ async def on_reaction_add(reaction, user):
         if str(reaction.emoji) == "❌": ctx.command = bot.get_command('leave')
         if str(reaction.emoji) == "🔄": ctx.command = bot.get_command('restart')
         if str(reaction.emoji) == "⏏️": ctx.command = bot.get_command('flush')
+        if str(reaction.emoji) == "🔗": ctx.command = bot.get_command('link')
         if str(reaction.emoji) == "💀": ctx.command = bot.get_command('hiddenmenu')
         await bot.invoke(ctx)
 
@@ -296,6 +304,7 @@ async def on_reaction_remove(reaction, user):
         if str(reaction.emoji) == "❌": ctx.command = bot.get_command('leave')
         if str(reaction.emoji) == "🔄": ctx.command = bot.get_command('restart')
         if str(reaction.emoji) == "⏏️": ctx.command = bot.get_command('flush')
+        if str(reaction.emoji) == "🔗": ctx.command = bot.get_command('link')
         if str(reaction.emoji) == "💀": ctx.command = bot.get_command('hiddenmenu')
         await bot.invoke(ctx)
 

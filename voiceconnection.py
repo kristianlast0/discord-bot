@@ -37,7 +37,7 @@ class VoiceConnection:
             if not self.stopped:
                 if self.mh.getTrackIndex() == self.mh.incTrackIndex():
                     self.stopped = True
-                    if self.client.self.is_playing():
+                    if self.client.is_playing():
                         self.client.stop()
 
         self.stopped = False
