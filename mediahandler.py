@@ -17,7 +17,7 @@ class MediaHandler:
         self.tracks = [{"type": "queue", "pos": 0}]
         self.trackPath = os.getenv("track_path")
 
-    async def getInfo(self, search, noplaylist=True): # get all relevant search information in dict form.
+    async def getInfo(self, ctx, search, noplaylist=True): # get all relevant search information in dict form.
         #try:
         if not search.startswith("https://youtu"):
             query_string = urllib.parse.urlencode({"search_query": search})
@@ -29,10 +29,9 @@ class MediaHandler:
             i = {"title":info["title"], "link":search, "duration":info["duration"], "is_live":info["is_live"], "file": None}
             print("Is Live? "+str(i["is_live"]))
             if not i["is_live"] and self.download:
-                i["file"] = await self.getFile(i["title"], search)
+                async with ctx.typing():
+                    await self.getFile(i["title"], i["link"])
             return(i)
-        #except:
-            return None
 
     def getTrackIndex(self):
         if self.tracks[0]["pos"] == 0:
@@ -58,26 +57,29 @@ class MediaHandler:
         with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':True}) as ydl:
             return(ydl.extract_info(link, download=False)["url"])
 
-    def getCurrentSource(self):
+    async def getSource(self, ctx):
         if self.tracks[self.getTrackIndex()]["is_live"] or not self.download:
             print("Streaming Audio!")
             return(self.getDURL(self.tracks[self.getTrackIndex()]["link"]))
         else:
-            print("File based route!")
-            return(self.tracks[self.getTrackIndex()]["file"])
+            print("File based audio!")
+            async with ctx.typing():
+                f = await self.getFile(self.getName(), self.getLink())
+            return(f)
 
-    def getCurrentName(self):
+    def getName(self):
         return(self.tracks[self.getTrackIndex()]["title"])
+
+    def getLink(self):
+        return(self.tracks[self.getTrackIndex()]["link"])
 
     async def getFile(self, name, search):
         f = re.sub('[^A-Za-z0-9-]+', '', name).lower()+".wav"
         filename = self.trackPath + f
         if os.path.isfile(filename):
             return filename
-        #try:
-        task = asyncio.wait_for(await self.downloader(search, filename), 10)
-        #except RuntimeError:
-            #print("Download Finished")
+        else:
+            await self.downloader(search, filename)
         return filename
 
     async def downloader(self, search, filename):

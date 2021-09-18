@@ -30,25 +30,26 @@ class VoiceConnection:
     async def playQueue(self, ctx, opus = True):
         if opus: encoder = discord.FFmpegOpusAudio.from_probe
         else: encoder = discord.FFmpegPCMAudio
-        is_playing = False
+        self.is_playing = False
 
         def r():
-            is_playing = False
+            self.is_playing = False
             if not self.stopped:
                 if self.mh.getTrackIndex() == self.mh.incTrackIndex():
                     self.stopped = True
-                    if self.client.is_playing():
+                    if self.client.self.is_playing():
                         self.client.stop()
 
         self.stopped = False
         while not self.stopped:
-            msg = await ctx.send("**[Playing:]** " + self.mh.getCurrentName())
+            msg = await ctx.send("**[Playing:]** " + self.mh.getName())
             await msg.add_reaction(emoji="📜")
+            await msg.add_reaction(emoji="🔗")
             #await msg.add_reaction(emoji="👍")
-            source = await encoder(self.mh.getCurrentSource())
-            is_playing = True
+            source = await encoder(await self.mh.getSource(ctx))
+            self.is_playing = True
             self.client.play(source, after=lambda e:r())
-            while is_playing:
+            while self.is_playing:
                 await sleep(1)
 
         return self.client

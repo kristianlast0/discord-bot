@@ -69,7 +69,7 @@ async def play(ctx, *search):
     if not c:
         return
     if search != "":
-        i = await v.mh.getInfo((" ").join(search))
+        i = await v.mh.getInfo(ctx, (" ").join(search))
         if i != None:
             v.mh.addTrack(i)
             msg = await ctx.send("Queued: "+i["title"])
@@ -202,6 +202,14 @@ async def flush(ctx):
     await v.stop()
     v.mh.flush()
     await ctx.send("**Flushing Queue**")
+    return
+
+@bot.command(name='link', help='🔗:Link current track.')
+async def link(ctx):
+    g, v, c = await auth(ctx)
+    if not c:
+        return
+    await ctx.send(str(v.mh.getLink()))
     return
 
 @bot.command(name='join', category="Media Control", help="Bot will join the channel.")
