@@ -99,7 +99,7 @@ async def stop(ctx):
     if not c:
         return
     if c.is_playing():
-        v.stop()
+        await v.stop()
         msg = await ctx.send("**[Stopped]**")
     else:
         msg = await ctx.send("The bot is not playing anything at the moment.")
@@ -111,7 +111,7 @@ async def skip(ctx):
     g, v, c = await auth(ctx)
     if not c:
         return
-    v.stop()
+    await v.stop()
     v.mh.incTrackIndex()
     await v.playQueue(ctx)
     return
@@ -121,17 +121,17 @@ async def back(ctx):
     g, v, c = await auth(ctx)
     if not c:
         return
-    v.stop()
+    await v.stop()
     v.mh.decTrackIndex()
     await v.playQueue(ctx)
     return
 
-@bot.command(name='restart', help="⏮️:Skip backwards through playlist.")
+@bot.command(name='restart', help="🔄:Skip backwards through playlist.")
 async def restart(ctx):
     g, v, c = await auth(ctx)
     if not c:
         return
-    v.stop()
+    await v.stop()
     v.mh.setTrackIndex(1)
     await v.playQueue(ctx)
     return
@@ -186,7 +186,7 @@ async def load(ctx, playlist_index):
     with open(os.getenv("playlist_path")+json_files[playlist_index]) as json_file:
         playlist = json.load(json_file)
         user = ctx.author
-        if c.is_playing(): v.stop()
+        if c.is_playing(): await v.stop()
         v.mh.tracks = []
         v.mh.setTrackIndex = 0
         v.mh.tracks = playlist['tracks']
@@ -199,7 +199,7 @@ async def flush(ctx):
     g, v, c = await auth(ctx)
     if not c:
         return
-    v.stop()
+    await v.stop()
     v.mh.flush()
     await ctx.send("**Flushing Queue**")
     return
@@ -220,7 +220,7 @@ async def leave(ctx):
         return
     voice_client = ctx.message.guild.voice_client
     if voice_client.is_connected():
-        v.stop()
+        await v.stop()
         await voice_client.disconnect()
     else:
         await ctx.send("The bot is not connected to a voice channel.")

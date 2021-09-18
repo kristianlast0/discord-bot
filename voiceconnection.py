@@ -16,11 +16,14 @@ class VoiceConnection:
             return(self.client.is_connected())
 
     async def connect(self, ctx):
-        self.client = await ctx.author.voice.channel.connect()
+        try:
+            self.client = await ctx.author.voice.channel.connect()
+        except:
+            print("Already connected to a voice channel.")
         return
 
     async def disconnect(self):
-        self.stop()
+        await self.stop()
         await self.client.disconnect()
         return
 
@@ -28,33 +31,33 @@ class VoiceConnection:
         if opus: encoder = discord.FFmpegOpusAudio.from_probe
         else: encoder = discord.FFmpegPCMAudio
         is_playing = False
-        self.stopped = False
 
         def r():
             is_playing = False
+            if not self.stopped:
+                if self.mh.getTrackIndex() == self.mh.incTrackIndex():
+                    self.stopped = True
+                    if self.client.is_playing():
+                        self.client.stop()
 
+        self.stopped = False
         while not self.stopped:
             msg = await ctx.send("**[Playing:]** " + self.mh.getCurrentName())
             await msg.add_reaction(emoji="📜")
             #await msg.add_reaction(emoji="👍")
             source = await encoder(self.mh.getCurrentSource())
             is_playing = True
-            try:
-                self.client.play(source, after=lambda e:r())
-                while is_playing:
-                    await sleep(1)
-                if not self.stopped:
-                    if self.mh.getTrackIndex() == self.mh.incTrackIndex():
-                        self.stop()
-            except:
-                print("Failed to play.")
-                is_playing = False
+            self.client.play(source, after=lambda e:r())
+            while is_playing:
+                await sleep(1)
+
         return self.client
 
-    def stop(self):
+    async def stop(self):
         self.stopped = True
         if self.client.is_playing():
             self.client.stop()
+        await sleep(1)
 
     async def playPause(self, ctx):
         if self.client.is_playing():
