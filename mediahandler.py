@@ -58,20 +58,23 @@ class MediaHandler:
             return(ydl.extract_info(link, download=False)["url"])
 
     async def getSource(self, ctx):
-        if self.tracks[self.getTrackIndex()]["is_live"] or not self.download or int(self.tracks[self.getTrackIndex()]["duration"]) > 600:
+        if self.tracks[self.getTrackIndex()]["is_live"] or not self.download or int(self.getDuration()) > 600:
             print("Streaming Audio!")
-            return(self.getDURL(self.tracks[self.getTrackIndex()]["link"]))
+            return(self.getDURL(self.tracks[self.getTrackIndex()]["link"]), True)
         else:
             print("File based audio!")
             async with ctx.typing():
                 f = await self.getFile(self.getName(), self.getLink())
-            return(f)
+            return(f, False)
 
     def getName(self):
         return(self.tracks[self.getTrackIndex()]["title"])
 
     def getLink(self):
         return(self.tracks[self.getTrackIndex()]["link"])
+
+    def getDuration(self):
+        return(self.tracks[self.getTrackIndex()]["duration"])
 
     async def getFile(self, name, search):
         f = re.sub('[^A-Za-z0-9-]+', '', name).lower()+".wav"
