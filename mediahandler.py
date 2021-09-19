@@ -14,7 +14,7 @@ class MediaHandler:
     def __init__(self, bitRate):
         self.bitRate = bitRate
         self.download = os.getenv("download")
-        self.tracks = [{"type": "queue", "pos": 0}]
+        self.tracks = [{"name": "undefined", "type": "queue", "pos": 0}]
         self.trackPath = os.getenv("track_path")
 
     async def getInfo(self, ctx, search, noplaylist=True): # get all relevant search information in dict form.

@@ -147,9 +147,9 @@ async def queue(ctx):
     for idx,track in enumerate(v.mh.queue()):
         if idx > 0:
             trackList += "**"+str(idx)+": "+("[Playing]** " if v.mh.getTrackIndex() == idx else "**")+track['title']+"\n"
-    msg = await ctx.send("**Media Queue:** \n"+trackList)
+    msg = await ctx.send("**Media Queue:** " + v.mh.tracks[0]["name"] + "\n"+trackList)
     await reactions(msg)
-    #print(v.mh.tracks)
+    print(v.mh.tracks)
     return
 
 @bot.command(name='playlists', help="Show saved playlists.")
@@ -162,19 +162,28 @@ async def playlists(ctx):
         for index, js in enumerate(json_files):
             with open(os.path.join(os.getenv("playlist_path"), js)) as json_file:
                 playlist = json.load(json_file)
-                playlists += "**"+str(index+1)+"**: "+playlist['name']+"\n"
+                playlists += "**"+str(index+1)+"**: "+playlist[0]['name']+"\n"
         await ctx.send("**Saved Playlists:** \n"+playlists)
+
+@bot.command(name='changename', help="Rename current playlist")
+async def changename(ctx, *name):
+    g, v, c = await auth(ctx)
+    name = (" ").join(name)
+    v.mh.tracks[0]["name"] = name
+    return
 
 @bot.command(name='save', help="Save current playlist")
 async def save(ctx, *name):
     g, v, c = await auth(ctx)
     name = (" ").join(name)
-    if name == "":
+    if name == "" and v.mh.tracks[0]["name"] == "undefined":
         await ctx.send("**Please enter a name for the playlist**")
         return
-    playlist = { "name": name, "tracks": v.mh.tracks }
+    v.mh.tracks[0]["type"] = "playlist"
+    if v.mh.tracks[0]["name"] == "undefined":
+        v.mh.tracks[0]["name"] = name 
     with open(os.getenv("playlist_path")+str(datetime.timestamp(datetime.now()))+'.json', 'w') as outfile:
-        json.dump(playlist, outfile)
+        json.dump(v.mh.tracks, outfile)
         await ctx.send("**Playlist saved!:** \n"+name+" with "+str(len(v.mh.tracks) - 1)+" tracks")
     return
 
@@ -193,9 +202,8 @@ async def load(ctx, playlist_index):
         if c.is_playing(): 
             async with ctx.typing():
                 await v.stop()
-        v.mh.tracks = []
-        v.mh.setTrackIndex = 0
-        v.mh.tracks = playlist['tracks']
+        v.mh.tracks = playlist
+        v.mh.setTrackIndex(1)
         await v.playQueue(ctx)
         await ctx.send("**Loaded playlist:** \n"+playlist['name']+" with "+str(len(playlist['tracks']))+" tracks")
     return
