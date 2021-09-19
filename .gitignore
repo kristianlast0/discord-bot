@@ -1,9 +1,10 @@
-tracks/
-thumbnails/
-playlists/
+tracks/*
+thumbnails/*
+playlists/*
 .env
 __pycache__/
 test.py
-backup/
 ./tts/tts*
 pull.sh
+ignore
+ignore/*
