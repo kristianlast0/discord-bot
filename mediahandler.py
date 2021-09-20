@@ -14,7 +14,7 @@ class MediaHandler:
     def __init__(self, bitRate):
         self.bitRate = bitRate
         self.download = os.getenv("download")
-        self.tracks = [{"name": "undefined", "type": "queue", "pos": 0}]
+        self.tracks = [{"name": "undefined", "type": "queue", "pos": 1}]
         self.trackPath = os.getenv("track_path")
 
     def getInfo(self, ctx, search, noplaylist=True): # get all relevant search information in dict form.
@@ -26,11 +26,11 @@ class MediaHandler:
             search = "https://www.youtube.com/watch?v=" + "{}".format(search_results[0])
         with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':noplaylist}) as ydl:
             info = ydl.extract_info(search, download=False)
-            print(info)
+            #for i in info:
+            #    print(info["id"]+" "+info["title"])
             i = {"title":info["title"],"link":search, "duration":info["duration"], "is_live":info["is_live"], "file": None}
-            p = self.nameToPath(i["name"])
-            if self.fileExists(p):
-                i["file"] = p
+            p = self.nameToPath(i["title"])
+            i["file"] = p
             return([i])
 
     def getTrackIndex(self):
@@ -57,9 +57,9 @@ class MediaHandler:
         with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':True}) as ydl:
             return(ydl.extract_info(link, download=False)["url"])
 
-    def getSource(self, ctx):
+    def getSource(self):
         p = self.getFile()
-        if self.fileExists(p):
+        if self.fileExists(p): 
             print("File based audio!")
             return(p, False)
         else:

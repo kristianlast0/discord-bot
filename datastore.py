@@ -7,7 +7,7 @@ ydl_opts = {
                     'preferredquality': 128
                 }],
                 'postprocessor_args': [
-                    '-ar', '16000'
+                    '-ar', 16000
                 ],
                 'ratelimit': 500000,
                 'prefer_ffmpeg': True,

@@ -70,19 +70,19 @@ async def play(ctx, *search):
     g, v, c = await auth(ctx)
     if not c:
         return
-    if search != "":
-        i = await v.mh.getInfo(ctx, (" ").join(search))
+    if search != ():
+        i = v.mh.getInfo(ctx, (" ").join(search))
         for t in i:
             if t:
-                if not t["File"] or t["is_live"]:
-                    dl.add({"link":t["link"], "path":t["path"]})
+                if not t["is_live"] and not os.path.isfile(t["file"]):
+                    dl.add([{"link":t["link"], "file":t["file"]}])
                 v.mh.addTrack(t)
-                msg = await ctx.send("Queued: "+i["title"])
+                msg = await ctx.send("Queued: "+t["title"])
                 await msg.add_reaction(emoji="📜")
             else:
                 await ctx.send(f"Failed to find result!")
                 return
-        if not v.c.is_playing():
+        if not c.is_playing():
             await v.playQueue(ctx)
         return
     else:
@@ -90,21 +90,24 @@ async def play(ctx, *search):
             await v.playQueue(ctx)
         return
 
-@bot.command(name='download', help="▶️:Add and play tracks.")
+@bot.command(name='download', help="⬇️:Preemptively download tracks.")
 async def download(ctx, *search):
     g, v, c = await auth(ctx)
-    if search != "":
-        i = await v.mh.getInfo(ctx, (" ").join(search), False)
+    print(search)
+    if search != ():
+        i = v.mh.getInfo(ctx, (" ").join(search), False)
+        d = []
         for t in i:
             if t:
-                if not t["File"] or t["is_live"]:
-                    dl.add({"link":t["link"], "path":t["path"]})
-                v.mh.addTrack(t)
-                msg = await ctx.send("Queued: "+i["title"])
+                if not t["is_live"] and not os.path.isfile(t["file"]):
+                    d.append({"link":t["link"], "file":t["file"]})
+                msg = await ctx.send("Downloading: "+str(t["title"]))
                 await msg.add_reaction(emoji="📜")
             else:
                 await ctx.send(f"Failed to find result!")
                 return
+        if len(d) > 0:
+            dl.add(d)
     else:
         await ctx.send(f"Download command requires a link or search term.")        
     return
@@ -308,7 +311,7 @@ async def on_message(message):
 async def on_reaction_add(reaction, user):
     #print("on_reaction_add event")
     #print(user.bot)
-    if not user.bot: # ⏯️ ⏹️ ⏮️ ⏭️ 🔄 📜 ⏏️ ⤴️ ⤵️ 🎲 💀 👍
+    if not user.bot: # ⏯️ ⏹️ ⏮️ ⏭️ 🔄 📜 ⏏️ ⤴️ ⤵️ 🎲 💀 👍 ⬇️
         ctx = await bot.get_context(reaction.message, cls=commands.Context)
         if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('playpause')
         if str(reaction.emoji) == "⏹️": ctx.command = bot.get_command('stop')
