@@ -13,7 +13,6 @@ class MediaHandler:
     
     def __init__(self, bitRate):
         self.bitRate = bitRate
-        self.download = os.getenv("download")
         self.tracks = [{"name": "undefined", "type": "queue", "pos": 1}]
         self.trackPath = os.getenv("track_path")
 
