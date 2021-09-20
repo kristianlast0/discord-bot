@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import random
 from mediahandler import MediaHandler
 from voiceconnection import VoiceConnection
+from downloader import Downloader
 import pyttsx3
 import os, json
 import pandas as pd
@@ -27,6 +28,7 @@ DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os
 # client = discord.Client(intents=intents)
 prefix = "!" if os.getenv("env") == "prod" else os.getenv("command_prefix")
 bot = commands.Bot(command_prefix=prefix)
+dl = Downloader()
 guilds = {}
 
 def getguild(ctx): # get guild relevant objects in dict form.
@@ -68,15 +70,21 @@ async def play(ctx, *search):
     g, v, c = await auth(ctx)
     if not c:
         return
-    if search != "":
-        i = await v.mh.getInfo(ctx, (" ").join(search))
-        if i != None:
-            v.mh.addTrack(i)
-            msg = await ctx.send("Queued: "+i["title"])
-            await msg.add_reaction(emoji="📜")
-        else:
-            await ctx.send(f"Failed to find result!")
-            return
+    if search != ():
+        i = v.mh.getInfo(ctx, (" ").join(search))
+        d = []
+        for t in i:
+            if t:
+                if not t["is_live"] and not os.path.isfile(t["file"]):
+                    d.append({"link":t["link"], "file":t["file"]})
+                v.mh.addTrack(t)
+                msg = await ctx.send("Queued: "+t["title"])
+                await msg.add_reaction(emoji="📜")
+            else:
+                await ctx.send(f"Failed to find result!")
+                return
+        if len(d) > 0:
+            dl.add(d)
         if not c.is_playing():
             await v.playQueue(ctx)
         return
@@ -84,6 +92,28 @@ async def play(ctx, *search):
         if v.stopped:
             await v.playQueue(ctx)
         return
+
+@bot.command(name='download', help="⬇️:Preemptively download tracks.")
+async def download(ctx, *search):
+    g, v, c = await auth(ctx)
+    print(search)
+    if search != ():
+        i = v.mh.getInfo(ctx, (" ").join(search), False)
+        d = []
+        for t in i:
+            if t:
+                if not t["is_live"] and not os.path.isfile(t["file"]):
+                    d.append({"link":t["link"], "file":t["file"]})
+                msg = await ctx.send("Downloading: "+str(t["title"]))
+                await msg.add_reaction(emoji="📜")
+            else:
+                await ctx.send(f"Failed to find result!")
+                return
+        if len(d) > 0:
+            dl.add(d)
+    else:
+        await ctx.send(f"Download command requires a link or search term.")        
+    return
 
 @bot.command(name='playpause', help="⏯️:Play/Resume and Pause")
 async def playpause(ctx):
@@ -284,7 +314,7 @@ async def on_message(message):
 async def on_reaction_add(reaction, user):
     #print("on_reaction_add event")
     #print(user.bot)
-    if not user.bot: # ⏯️ ⏹️ ⏮️ ⏭️ 🔄 📜 ⏏️ ⤴️ ⤵️ 🎲 💀 👍
+    if not user.bot: # ⏯️ ⏹️ ⏮️ ⏭️ 🔄 📜 ⏏️ ⤴️ ⤵️ 🎲 💀 👍 ⬇️
         ctx = await bot.get_context(reaction.message, cls=commands.Context)
         if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('playpause')
         if str(reaction.emoji) == "⏹️": ctx.command = bot.get_command('stop')
