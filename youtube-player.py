@@ -72,16 +72,19 @@ async def play(ctx, *search):
         return
     if search != ():
         i = v.mh.getInfo(ctx, (" ").join(search))
+        d = []
         for t in i:
             if t:
                 if not t["is_live"] and not os.path.isfile(t["file"]):
-                    dl.add([{"link":t["link"], "file":t["file"]}])
+                    d.append({"link":t["link"], "file":t["file"]})
                 v.mh.addTrack(t)
                 msg = await ctx.send("Queued: "+t["title"])
                 await msg.add_reaction(emoji="📜")
             else:
                 await ctx.send(f"Failed to find result!")
                 return
+        if len(d) > 0:
+            dl.add(d)
         if not c.is_playing():
             await v.playQueue(ctx)
         return
