@@ -1,3 +1,20 @@
+ydl_opts = {
+                'outtmpl': "",
+                'format': 'bestaudio/best',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'wav',
+                    'preferredquality': 128
+                }],
+                'postprocessor_args': [
+                    '-ar', '16000'
+                ],
+                'ratelimit': 500000,
+                'prefer_ffmpeg': True,
+                'keepvideo': False,
+                'quiet': False
+            }
+
 welcome_messages = {
      "tts-whatsupbitches": "Whats up bitches",
      "tts-makewayfortheking": "Make way for the king",

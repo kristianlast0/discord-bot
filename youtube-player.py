@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import random
 from mediahandler import MediaHandler
 from voiceconnection import VoiceConnection
+from downloader import Downloader
 import pyttsx3
 import os, json
 import pandas as pd
@@ -27,6 +28,7 @@ DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os
 # client = discord.Client(intents=intents)
 prefix = "!" if os.getenv("env") == "prod" else os.getenv("command_prefix")
 bot = commands.Bot(command_prefix=prefix)
+dl = Downloader()
 guilds = {}
 
 def getguild(ctx): # get guild relevant objects in dict form.
@@ -70,20 +72,42 @@ async def play(ctx, *search):
         return
     if search != "":
         i = await v.mh.getInfo(ctx, (" ").join(search))
-        if i != None:
-            v.mh.addTrack(i)
-            msg = await ctx.send("Queued: "+i["title"])
-            await msg.add_reaction(emoji="📜")
-        else:
-            await ctx.send(f"Failed to find result!")
-            return
-        if not c.is_playing():
+        for t in i:
+            if t:
+                if not t["File"] or t["is_live"]:
+                    dl.add({"link":t["link"], "path":t["path"]})
+                v.mh.addTrack(t)
+                msg = await ctx.send("Queued: "+i["title"])
+                await msg.add_reaction(emoji="📜")
+            else:
+                await ctx.send(f"Failed to find result!")
+                return
+        if not v.c.is_playing():
             await v.playQueue(ctx)
         return
     else:
         if v.stopped:
             await v.playQueue(ctx)
         return
+
+@bot.command(name='download', help="▶️:Add and play tracks.")
+async def download(ctx, *search):
+    g, v, c = await auth(ctx)
+    if search != "":
+        i = await v.mh.getInfo(ctx, (" ").join(search), False)
+        for t in i:
+            if t:
+                if not t["File"] or t["is_live"]:
+                    dl.add({"link":t["link"], "path":t["path"]})
+                v.mh.addTrack(t)
+                msg = await ctx.send("Queued: "+i["title"])
+                await msg.add_reaction(emoji="📜")
+            else:
+                await ctx.send(f"Failed to find result!")
+                return
+    else:
+        await ctx.send(f"Download command requires a link or search term.")        
+    return
 
 @bot.command(name='playpause', help="⏯️:Play/Resume and Pause")
 async def playpause(ctx):

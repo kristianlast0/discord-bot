@@ -17,7 +17,7 @@ class MediaHandler:
         self.tracks = [{"name": "undefined", "type": "queue", "pos": 0}]
         self.trackPath = os.getenv("track_path")
 
-    async def getInfo(self, ctx, search, noplaylist=True): # get all relevant search information in dict form.
+    def getInfo(self, ctx, search, noplaylist=True): # get all relevant search information in dict form.
         #try:
         if not search.startswith("https://youtu"):
             query_string = urllib.parse.urlencode({"search_query": search})
@@ -26,12 +26,12 @@ class MediaHandler:
             search = "https://www.youtube.com/watch?v=" + "{}".format(search_results[0])
         with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':noplaylist}) as ydl:
             info = ydl.extract_info(search, download=False)
-            i = {"title":info["title"],"link":search, "duration":info["duration"], "is_live":info["is_live"]}
-            print("Is Live? "+str(i["is_live"]))
-            if not i["is_live"] and self.download and int(i["duration"]) < 600:
-                async with ctx.typing():
-                    await self.getFile(i["title"], i["link"])
-            return(i)
+            print(info)
+            i = {"title":info["title"],"link":search, "duration":info["duration"], "is_live":info["is_live"], "file": None}
+            p = self.nameToPath(i["name"])
+            if self.fileExists(p):
+                i["file"] = p
+            return([i])
 
     def getTrackIndex(self):
         if self.tracks[0]["pos"] == 0:
@@ -57,15 +57,14 @@ class MediaHandler:
         with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':True}) as ydl:
             return(ydl.extract_info(link, download=False)["url"])
 
-    async def getSource(self, ctx):
-        if self.tracks[self.getTrackIndex()]["is_live"] or not self.download or int(self.getDuration()) > 600:
+    def getSource(self, ctx):
+        p = self.getFile()
+        if self.fileExists(p):
+            print("File based audio!")
+            return(p, False)
+        else:
             print("Streaming Audio!")
             return(self.getDURL(self.tracks[self.getTrackIndex()]["link"]), True)
-        else:
-            print("File based audio!")
-            async with ctx.typing():
-                f = await self.getFile(self.getName(), self.getLink())
-            return(f, False)
 
     def getName(self):
         return(self.tracks[self.getTrackIndex()]["title"])
@@ -76,38 +75,15 @@ class MediaHandler:
     def getDuration(self):
         return(self.tracks[self.getTrackIndex()]["duration"])
 
-    async def getFile(self, name, search):
-        f = re.sub('[^A-Za-z0-9-]+', '', name).lower()+".wav"
-        filename = self.trackPath + f
-        if os.path.isfile(filename):
-            return filename
-        else:
-            await self.downloader(search, filename)
-        return filename
+    def getFile(self):
+        return(self.tracks[self.getTrackIndex()]["file"])
 
-    async def downloader(self, search, filename):
-        print("Download Started.")
-        ydl_opts = {
-            'outtmpl': filename,
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'wav',
-                'preferredquality': self.bitRate
-            }],
-            'postprocessor_args': [
-                '-ar', '16000'
-            ],
-            'ratelimit': int(os.getenv("ratelimit")),
-            'prefer_ffmpeg': True,
-            'keepvideo': False,
-            'quiet': False
-        }
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([search])
-        print("Download Finished.")
-        return
+    def fileExists(self, filename):
+        return(os.path.isfile(filename))
 
+    def nameToPath(self, name):
+        return(self.trackPath+re.sub('[^A-Za-z0-9-]+', '', name).lower()+".wav")
+    
     def addTrack(self, i):
         track = {
                 "title": i["title"],
@@ -117,7 +93,8 @@ class MediaHandler:
                 "completed_at": None,
                 "duration": i["duration"],
                 "link": i["link"],
-                "is_live": i["is_live"]
+                "is_live": i["is_live"],
+                "file": i["file"]
             }
         self.tracks.append(track)
         return track

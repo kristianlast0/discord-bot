@@ -42,7 +42,7 @@ class VoiceConnection:
 
         self.stopped = False
         while not self.stopped:
-            source, stream = await self.mh.getSource(ctx)
+            source, stream = self.mh.getSource(ctx)
             if stream:
                 msg = await ctx.send("**[Streaming:]** " + self.mh.getName())
             else:
