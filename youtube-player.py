@@ -75,7 +75,7 @@ async def play(ctx, *search):
     if not c:
         await ctx.send(f"Thats not possible.")
         return
-    end = v.mh.isFinished()
+    end = v.mh.isLastTrack(v.mh.getTrackIndex())
     if search != ():
         i = v.mh.getInfo(ctx, (" ").join(search))
         d = []
@@ -231,6 +231,30 @@ async def changename(ctx, *name):
     v.mh.tracks[0]["name"] = name
     return
 
+@bot.command(name="remove", help="Remove a track from queue, use !queue to get track number. Example: !pop 2")
+async def remove(ctx, index):
+    g, v, c = await auth(ctx)
+    if not c:
+        await ctx.send(f"Thats not possible.")
+        return
+    index = int(index)
+    if index >= 0 and index <= len(v.mh.tracks) - 1:
+        if index == v.mh.getTrackIndex():
+            if not v.stopped:
+                await v.stop()
+            if v.mh.isLastTrack(index):
+                v.mh.setTrackIndex(v.mh.getTrackIndex() - 1)
+                return
+            v.mh.tracks.pop(index)
+            await v.playQueue(ctx)
+        elif index < v.mh.getTrackIndex():
+            v.mh.tracks.pop(index)
+            v.mh.setTrackIndex(v.mh.getTrackIndex() - 1)
+        elif index > v.mh.getTrackIndex():
+            v.mh.tracks.pop(index)
+    else:
+        await ctx.send("Are you fucking with me?")
+
 @bot.command(name='flush', help='⏏️:Flush queue of all songs.')
 async def flush(ctx):
     g, v, c = await auth(ctx)
@@ -246,9 +270,6 @@ async def flush(ctx):
 @bot.command(name='link', help='🔗:Link current track.')
 async def link(ctx):
     g, v, c = await auth(ctx)
-    if not c:
-        await ctx.send(f"Thats not possible.")
-        return
     await ctx.send(str(v.mh.getLink()))
     return
 

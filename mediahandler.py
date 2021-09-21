@@ -53,7 +53,7 @@ class MediaHandler:
             self.tracks[0]["pos"] -= 1
         return(self.getTrackIndex())
 
-    def getDURL(self, link): # get direct url for video.
+    def getDURL(self, link):
         with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':True}) as ydl:
             return(ydl.extract_info(link, download=False)["url"])
 
@@ -85,10 +85,12 @@ class MediaHandler:
     def nameToPath(self, name):
         return(self.trackPath+re.sub('[^A-Za-z0-9-]+', '', name).lower()+".wav")
 
-    def isFinished(self):
-        if len(self.tracks) == self.getTrackIndex:
+    def isLastTrack(self, i):
+        if len(self.tracks) - 1 == i:
+            print("Is finished.")
             return(True)
         else:
+            print("Is not finished.")
             return(False)
     
     def addTrack(self, i):
