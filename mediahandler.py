@@ -109,7 +109,7 @@ class MediaHandler:
         return track
 
     def flush(self):
-        self.tracks = [{"type": "queue", "pos": 0}]
+        self.tracks = [{"name":"undefined","type": "queue", "pos": 0}]
 
     def queue(self):
         if len(self.tracks) == 1: return []
