@@ -14,7 +14,7 @@ class MediaHandler:
     def __init__(self, bitRate):
         self.bitRate = bitRate
         self.download = os.getenv("download")
-        self.tracks = [{"name": "undefined", "type": "queue", "pos": 1}]
+        self.tracks = [{"name": "undefined", "type": "queue", "pos": 0}]
         self.trackPath = os.getenv("track_path")
 
     def getInfo(self, ctx, search, noplaylist=True): # get all relevant search information in dict form.
@@ -61,6 +61,7 @@ class MediaHandler:
         p = self.getFile()
         if self.fileExists(p): 
             print("File based audio!")
+            #os.utime(p, (access_time, modification_time))
             return(p, False)
         else:
             print("Streaming Audio!")
@@ -83,6 +84,12 @@ class MediaHandler:
 
     def nameToPath(self, name):
         return(self.trackPath+re.sub('[^A-Za-z0-9-]+', '', name).lower()+".wav")
+
+    def isFinished(self):
+        if len(self.tracks) == self.getTrackIndex:
+            return(True)
+        else:
+            return(False)
     
     def addTrack(self, i):
         track = {

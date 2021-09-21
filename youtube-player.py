@@ -69,7 +69,9 @@ async def reactions(msg, t = "full"):
 async def play(ctx, *search):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
+    end = v.mh.isFinished()
     if search != ():
         i = v.mh.getInfo(ctx, (" ").join(search))
         d = []
@@ -78,57 +80,39 @@ async def play(ctx, *search):
                 if not t["is_live"] and not os.path.isfile(t["file"]):
                     d.append({"link":t["link"], "file":t["file"]})
                 v.mh.addTrack(t)
-                msg = await ctx.send("Queued: "+t["title"])
-                await msg.add_reaction(emoji="📜")
+                if c.isplaying():
+                    msg = await ctx.send("Queued: "+t["title"])
+                    await msg.add_reaction(emoji="📜")
             else:
-                await ctx.send(f"Failed to find result!")
+                await ctx.send(f"Failed to find result for \"" + search + "\"")
                 return
         if len(d) > 0:
             dl.add(d)
-        if not c.is_playing():
+        if not c.is_playing() and not c.is_paused() and v.stopped:
+            if end:
+                v.mh.incTrackIndex()
             await v.playQueue(ctx)
-        return
     else:
-        if v.stopped:
-            await v.playQueue(ctx)
-        return
-
-@bot.command(name='download', help="⬇️:Preemptively download tracks.")
-async def download(ctx, *search):
-    g, v, c = await auth(ctx)
-    print(search)
-    if search != ():
-        i = v.mh.getInfo(ctx, (" ").join(search), False)
-        d = []
-        for t in i:
-            if t:
-                if not t["is_live"] and not os.path.isfile(t["file"]):
-                    d.append({"link":t["link"], "file":t["file"]})
-                msg = await ctx.send("Downloading: "+str(t["title"]))
-                await msg.add_reaction(emoji="📜")
-            else:
-                await ctx.send(f"Failed to find result!")
-                return
-        if len(d) > 0:
-            dl.add(d)
-    else:
-        await ctx.send(f"Download command requires a link or search term.")        
+        if v.stopped or v.c.is_paused():
+            await v.playPause(ctx)
     return
 
 @bot.command(name='playpause', help="⏯️:Play/Resume and Pause")
 async def playpause(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     await v.playPause(ctx)
     return
 
-@bot.command(name='stop', help="⏹️:Stop playing current track.")
-async def stop(ctx):
+@bot.command(name='stop' ,help="⏹️:Stop playing current track.")
+async def stop(ctx, arg):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
-    if c.is_playing():
+    if c.is_playing() or c.is_paused():
         async with ctx.typing():
             await v.stop()
         msg = await ctx.send("**[Stopped]**")
@@ -141,6 +125,7 @@ async def stop(ctx):
 async def skip(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     async with ctx.typing():
         await v.stop()
@@ -152,6 +137,7 @@ async def skip(ctx):
 async def back(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     async with ctx.typing():
         await v.stop()
@@ -163,6 +149,7 @@ async def back(ctx):
 async def restart(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     async with ctx.typing():
         await v.stop()
@@ -221,6 +208,7 @@ async def save(ctx, *name):
 async def load(ctx, playlist_index):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     playlist_index = int(playlist_index)-1
     json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
@@ -242,6 +230,7 @@ async def load(ctx, playlist_index):
 async def flush(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     async with ctx.typing():
         await v.stop()
@@ -253,6 +242,7 @@ async def flush(ctx):
 async def link(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     await ctx.send(str(v.mh.getLink()))
     return
@@ -261,6 +251,7 @@ async def link(ctx):
 async def join(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     msg = await ctx.send("Lets Go!")
     await reactions(msg)
@@ -270,6 +261,7 @@ async def join(ctx):
 async def leave(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     voice_client = ctx.message.guild.voice_client
     if voice_client.is_connected():
@@ -359,6 +351,29 @@ while True:
         print("Shit just went south. Restarting.")
 
 ######################################################################################################################################
+
+# @bot.command(name='download', help="⬇️:Preemptively download tracks.")
+# async def download(ctx, *search):
+#     g, v, c = await auth(ctx)
+#     #print(search)
+#     if search != ():
+#         i = v.mh.getInfo(ctx, (" ").join(search), False)
+#         d = []
+#         for t in i:
+#             if t:
+#                 if not t["is_live"] and not os.path.isfile(t["file"]):
+#                     d.append({"link":t["link"], "file":t["file"]})
+#                 msg = await ctx.send("Downloading: "+str(t["title"]))
+#                 await msg.add_reaction(emoji="📜")
+#             else:
+#                 await ctx.send(f"Failed to find result!")
+#                 return
+#         if len(d) > 0:
+#             dl.add(d)
+#     else:
+#         await ctx.send(f"Download command requires a link or search term.")        
+#     return
+
 
 # def onPlayerStopped(ctx, vc, lastTrackIndex):
 #     guild = getguild(ctx)
