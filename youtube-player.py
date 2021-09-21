@@ -239,11 +239,13 @@ async def remove(ctx, index):
         return
     index = int(index)
     if index >= 0 and index <= len(v.mh.tracks) - 1:
+        await ctx.send("**[Removed:] **"+v.mh.tracks[index]["title"])
         if index == v.mh.getTrackIndex():
             if not v.stopped:
                 await v.stop()
             if v.mh.isLastTrack(index):
                 v.mh.setTrackIndex(v.mh.getTrackIndex() - 1)
+                v.mh.tracks.pop(index)
                 return
             v.mh.tracks.pop(index)
             await v.playQueue(ctx)
