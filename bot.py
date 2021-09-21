@@ -239,7 +239,8 @@ async def remove(ctx, index):
         return
     index = int(index)
     if index >= 0 and index <= len(v.mh.tracks) - 1:
-        await ctx.send("**[Removed:] **"+v.mh.tracks[index]["title"])
+        msg = await ctx.send("**[Removed:] **"+v.mh.tracks[index]["title"])
+        await msg.add_reaction(emoji="📜")
         if index == v.mh.getTrackIndex():
             if not v.stopped:
                 await v.stop()
