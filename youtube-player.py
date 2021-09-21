@@ -220,8 +220,8 @@ async def load(ctx, playlist_index):
                 await v.stop()
         v.mh.tracks = playlist
         v.mh.setTrackIndex(1)
+        await ctx.send("**Loaded playlist:** \n"+playlist[0]['name']+" with "+str(len(playlist) - 1)+" tracks")
         await v.playQueue(ctx)
-        await ctx.send("**Loaded playlist:** \n"+playlist['name']+" with "+str(len(playlist['tracks']))+" tracks")
     return
 
 @bot.command(name='changename', help="Rename current playlist")
