@@ -32,23 +32,27 @@ dl = Downloader()
 guilds = {}
 
 def getguild(ctx): # get guild relevant objects in dict form.
-    try:
-        id = ctx.message.guild.id
-        if id in guilds.keys():
-            print("Guild found!")
-            return(guilds.get(id))
-        else:
-            d = {
-                "guild": ctx.message.guild,
-                "voice_connection": VoiceConnection("128")
-            }
-            guilds[id] = d
-            print("Guild added.")
-            #print(guilds)
-            return d
-    except:
-        print("Cannot get guild from this context.")
-        return None
+    #try:
+    id = ctx.message.guild.id
+    p = os.getenv("playlist_path")+str(id)
+    #print(ctx.message.guild)
+    if not os.path.isdir(p):
+        os.mkdir(p)
+    if id in guilds.keys():
+        print("Guild found!")
+        return(guilds.get(id))
+    else:
+        d = {
+            "guild": ctx.message.guild,
+            "voice_connection": VoiceConnection("128")
+        }
+        guilds[id] = d
+        print("Guild added.")
+        #print(guilds)
+        return d
+    # except:
+    #     print("Cannot get guild from this context.")
+    #     return None
 
 async def auth(ctx):
     g = getguild(ctx)
@@ -80,7 +84,7 @@ async def play(ctx, *search):
                 if not t["is_live"] and not os.path.isfile(t["file"]):
                     d.append({"link":t["link"], "file":t["file"]})
                 v.mh.addTrack(t)
-                if c.isplaying():
+                if c.is_playing():
                     msg = await ctx.send("Queued: "+t["title"])
                     await msg.add_reaction(emoji="📜")
             else:
@@ -171,23 +175,17 @@ async def queue(ctx):
 
 @bot.command(name='playlists', help="Show saved playlists.")
 async def playlists(ctx):
-    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
+    g, v, c = await auth(ctx)
+    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")+str(g["guild"].id)+"/") if pos_json.endswith('.json')]
     if len(json_files) == 0:
         await ctx.send("**You haven't saved any playlists yet:**\nSave the current queue with: !save \{name\}")
     else:
         playlists = ""
         for index, js in enumerate(json_files):
-            with open(os.path.join(os.getenv("playlist_path"), js)) as json_file:
+            with open(os.path.join(os.getenv("playlist_path")+str(g["guild"].id)+"/", js)) as json_file:
                 playlist = json.load(json_file)
                 playlists += "**"+str(index+1)+"**: "+playlist[0]['name']+"\n"
         await ctx.send("**Saved Playlists:** \n"+playlists)
-
-@bot.command(name='changename', help="Rename current playlist")
-async def changename(ctx, *name):
-    g, v, c = await auth(ctx)
-    name = (" ").join(name)
-    v.mh.tracks[0]["name"] = name
-    return
 
 @bot.command(name='save', help="Save current playlist")
 async def save(ctx, *name):
@@ -199,7 +197,7 @@ async def save(ctx, *name):
     v.mh.tracks[0]["type"] = "playlist"
     if v.mh.tracks[0]["name"] == "undefined":
         v.mh.tracks[0]["name"] = name 
-    with open(os.getenv("playlist_path")+str(datetime.timestamp(datetime.now()))+'.json', 'w') as outfile:
+    with open(os.getenv("playlist_path")+str(g["guild"].id)+"/"+str(datetime.timestamp(datetime.now()))+'.json', 'w') as outfile:
         json.dump(v.mh.tracks, outfile)
         await ctx.send("**Playlist saved!:** \n"+name+" with "+str(len(v.mh.tracks) - 1)+" tracks")
     return
@@ -211,10 +209,10 @@ async def load(ctx, playlist_index):
         await ctx.send(f"Thats not possible.")
         return
     playlist_index = int(playlist_index)-1
-    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
+    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")+str(g["guild"].id)+"/") if pos_json.endswith('.json')]
     if len(json_files) == 0:
         await ctx.send("**No playlists saved yet!**")
-    with open(os.getenv("playlist_path")+json_files[playlist_index]) as json_file:
+    with open(os.getenv("playlist_path")+str(g["guild"].id)+"/"+json_files[playlist_index]) as json_file:
         playlist = json.load(json_file)
         user = ctx.author
         if c.is_playing(): 
@@ -224,6 +222,13 @@ async def load(ctx, playlist_index):
         v.mh.setTrackIndex(1)
         await v.playQueue(ctx)
         await ctx.send("**Loaded playlist:** \n"+playlist['name']+" with "+str(len(playlist['tracks']))+" tracks")
+    return
+
+@bot.command(name='changename', help="Rename current playlist")
+async def changename(ctx, *name):
+    g, v, c = await auth(ctx)
+    name = (" ").join(name)
+    v.mh.tracks[0]["name"] = name
     return
 
 @bot.command(name='flush', help='⏏️:Flush queue of all songs.')
