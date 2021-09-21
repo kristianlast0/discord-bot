@@ -252,7 +252,7 @@ async def remove(ctx, index):
         elif index < v.mh.getTrackIndex():
             v.mh.tracks.pop(index)
             v.mh.setTrackIndex(v.mh.getTrackIndex() - 1)
-        elif index > v.mh.getTrackIndex():
+        else:
             v.mh.tracks.pop(index)
     else:
         await ctx.send("Are you fucking with me?")

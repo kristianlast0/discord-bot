@@ -1,10 +1,9 @@
-tracks/*
-thumbnails/*
-playlists/*
-.env
 __pycache__/
+tracks/
+thumbnails/
+playlists/
+tts/tts*
+ignore/
+.env
 test.py
-./tts/tts*
 pull.sh
-ignore
-ignore/*
