@@ -13,9 +13,12 @@ class Downloader:
             #print("Download Finished.")
         return
 
-    def add(self, t):
+    def add(self, t, prio = 1):
         from datastore import ydl_opts as opts
+        p = [200000, 500000, 1000000]
         for i in t:
             opts["outtmpl"] = i["file"]
+            opts["ratelimit"] = p[prio]
             Process(target = self.download, args=(i["link"], opts)).start()
         print("End of add reached.")
+        

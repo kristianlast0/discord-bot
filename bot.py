@@ -34,6 +34,10 @@ guilds = {}
 def getguild(ctx): # get guild relevant objects in dict form.
     try:
         id = ctx.message.guild.id
+        p = os.getenv("playlist_path")+str(id)
+        #print(ctx.message.guild)
+        if not os.path.isdir(p):
+            os.mkdir(p)
         if id in guilds.keys():
             print("Guild found!")
             return(guilds.get(id))
@@ -69,7 +73,9 @@ async def reactions(msg, t = "full"):
 async def play(ctx, *search):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
+    end = v.mh.isLastTrack(v.mh.getTrackIndex())
     if search != ():
         i = v.mh.getInfo(ctx, (" ").join(search))
         d = []
@@ -78,57 +84,39 @@ async def play(ctx, *search):
                 if not t["is_live"] and not os.path.isfile(t["file"]):
                     d.append({"link":t["link"], "file":t["file"]})
                 v.mh.addTrack(t)
-                msg = await ctx.send("Queued: "+t["title"])
-                await msg.add_reaction(emoji="📜")
+                if c.is_playing():
+                    msg = await ctx.send("Queued: "+t["title"])
+                    await msg.add_reaction(emoji="📜")
             else:
-                await ctx.send(f"Failed to find result!")
+                await ctx.send(f"Failed to find result for \"" + search + "\"")
                 return
         if len(d) > 0:
             dl.add(d)
-        if not c.is_playing():
+        if not c.is_playing() and not c.is_paused() and v.stopped:
+            if end:
+                v.mh.incTrackIndex()
             await v.playQueue(ctx)
-        return
     else:
-        if v.stopped:
-            await v.playQueue(ctx)
-        return
-
-@bot.command(name='download', help="⬇️:Preemptively download tracks.")
-async def download(ctx, *search):
-    g, v, c = await auth(ctx)
-    print(search)
-    if search != ():
-        i = v.mh.getInfo(ctx, (" ").join(search), False)
-        d = []
-        for t in i:
-            if t:
-                if not t["is_live"] and not os.path.isfile(t["file"]):
-                    d.append({"link":t["link"], "file":t["file"]})
-                msg = await ctx.send("Downloading: "+str(t["title"]))
-                await msg.add_reaction(emoji="📜")
-            else:
-                await ctx.send(f"Failed to find result!")
-                return
-        if len(d) > 0:
-            dl.add(d)
-    else:
-        await ctx.send(f"Download command requires a link or search term.")        
+        if v.stopped or v.c.is_paused():
+            await v.playPause(ctx)
     return
 
 @bot.command(name='playpause', help="⏯️:Play/Resume and Pause")
 async def playpause(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     await v.playPause(ctx)
     return
 
-@bot.command(name='stop', help="⏹️:Stop playing current track.")
-async def stop(ctx):
+@bot.command(name='stop' ,help="⏹️:Stop playing current track.")
+async def stop(ctx, arg):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
-    if c.is_playing():
+    if c.is_playing() or c.is_paused():
         async with ctx.typing():
             await v.stop()
         msg = await ctx.send("**[Stopped]**")
@@ -141,6 +129,7 @@ async def stop(ctx):
 async def skip(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     async with ctx.typing():
         await v.stop()
@@ -152,6 +141,7 @@ async def skip(ctx):
 async def back(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     async with ctx.typing():
         await v.stop()
@@ -163,6 +153,7 @@ async def back(ctx):
 async def restart(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     async with ctx.typing():
         await v.stop()
@@ -184,23 +175,17 @@ async def queue(ctx):
 
 @bot.command(name='playlists', help="Show saved playlists.")
 async def playlists(ctx):
-    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
+    g, v, c = await auth(ctx)
+    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")+str(g["guild"].id)+"/") if pos_json.endswith('.json')]
     if len(json_files) == 0:
         await ctx.send("**You haven't saved any playlists yet:**\nSave the current queue with: !save \{name\}")
     else:
         playlists = ""
         for index, js in enumerate(json_files):
-            with open(os.path.join(os.getenv("playlist_path"), js)) as json_file:
+            with open(os.path.join(os.getenv("playlist_path")+str(g["guild"].id)+"/", js)) as json_file:
                 playlist = json.load(json_file)
                 playlists += "**"+str(index+1)+"**: "+playlist[0]['name']+"\n"
         await ctx.send("**Saved Playlists:** \n"+playlists)
-
-@bot.command(name='changename', help="Rename current playlist")
-async def changename(ctx, *name):
-    g, v, c = await auth(ctx)
-    name = (" ").join(name)
-    v.mh.tracks[0]["name"] = name
-    return
 
 @bot.command(name='save', help="Save current playlist")
 async def save(ctx, *name):
@@ -212,7 +197,7 @@ async def save(ctx, *name):
     v.mh.tracks[0]["type"] = "playlist"
     if v.mh.tracks[0]["name"] == "undefined":
         v.mh.tracks[0]["name"] = name 
-    with open(os.getenv("playlist_path")+str(datetime.timestamp(datetime.now()))+'.json', 'w') as outfile:
+    with open(os.getenv("playlist_path")+str(g["guild"].id)+"/"+str(datetime.timestamp(datetime.now()))+'.json', 'w') as outfile:
         json.dump(v.mh.tracks, outfile)
         await ctx.send("**Playlist saved!:** \n"+name+" with "+str(len(v.mh.tracks) - 1)+" tracks")
     return
@@ -221,12 +206,13 @@ async def save(ctx, *name):
 async def load(ctx, playlist_index):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     playlist_index = int(playlist_index)-1
-    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")) if pos_json.endswith('.json')]
+    json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")+str(g["guild"].id)+"/") if pos_json.endswith('.json')]
     if len(json_files) == 0:
         await ctx.send("**No playlists saved yet!**")
-    with open(os.getenv("playlist_path")+json_files[playlist_index]) as json_file:
+    with open(os.getenv("playlist_path")+str(g["guild"].id)+"/"+json_files[playlist_index]) as json_file:
         playlist = json.load(json_file)
         user = ctx.author
         if c.is_playing(): 
@@ -234,14 +220,49 @@ async def load(ctx, playlist_index):
                 await v.stop()
         v.mh.tracks = playlist
         v.mh.setTrackIndex(1)
+        await ctx.send("**Loaded playlist:** \n"+playlist[0]['name']+" with "+str(len(playlist) - 1)+" tracks")
         await v.playQueue(ctx)
-        await ctx.send("**Loaded playlist:** \n"+playlist['name']+" with "+str(len(playlist['tracks']))+" tracks")
     return
+
+@bot.command(name='changename', help="Rename current playlist")
+async def changename(ctx, *name):
+    g, v, c = await auth(ctx)
+    name = (" ").join(name)
+    v.mh.tracks[0]["name"] = name
+    return
+
+@bot.command(name="remove", help="Remove a track from queue, use !queue to get track number. Example: !pop 2")
+async def remove(ctx, index):
+    g, v, c = await auth(ctx)
+    if not c:
+        await ctx.send(f"Thats not possible.")
+        return
+    index = int(index)
+    if index >= 0 and index <= len(v.mh.tracks) - 1:
+        msg = await ctx.send("**[Removed:] **"+v.mh.tracks[index]["title"])
+        await msg.add_reaction(emoji="📜")
+        if index == v.mh.getTrackIndex():
+            if not v.stopped:
+                await v.stop()
+            if v.mh.isLastTrack(index):
+                v.mh.setTrackIndex(v.mh.getTrackIndex() - 1)
+                v.mh.tracks.pop(index)
+                return
+            v.mh.tracks.pop(index)
+            await v.playQueue(ctx)
+        elif index < v.mh.getTrackIndex():
+            v.mh.tracks.pop(index)
+            v.mh.setTrackIndex(v.mh.getTrackIndex() - 1)
+        else:
+            v.mh.tracks.pop(index)
+    else:
+        await ctx.send("Are you fucking with me?")
 
 @bot.command(name='flush', help='⏏️:Flush queue of all songs.')
 async def flush(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     async with ctx.typing():
         await v.stop()
@@ -252,8 +273,6 @@ async def flush(ctx):
 @bot.command(name='link', help='🔗:Link current track.')
 async def link(ctx):
     g, v, c = await auth(ctx)
-    if not c:
-        return
     await ctx.send(str(v.mh.getLink()))
     return
 
@@ -261,6 +280,7 @@ async def link(ctx):
 async def join(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     msg = await ctx.send("Lets Go!")
     await reactions(msg)
@@ -270,6 +290,7 @@ async def join(ctx):
 async def leave(ctx):
     g, v, c = await auth(ctx)
     if not c:
+        await ctx.send(f"Thats not possible.")
         return
     voice_client = ctx.message.guild.voice_client
     if voice_client.is_connected():
@@ -359,6 +380,29 @@ while True:
         print("Shit just went south. Restarting.")
 
 ######################################################################################################################################
+
+# @bot.command(name='download', help="⬇️:Preemptively download tracks.")
+# async def download(ctx, *search):
+#     g, v, c = await auth(ctx)
+#     #print(search)
+#     if search != ():
+#         i = v.mh.getInfo(ctx, (" ").join(search), False)
+#         d = []
+#         for t in i:
+#             if t:
+#                 if not t["is_live"] and not os.path.isfile(t["file"]):
+#                     d.append({"link":t["link"], "file":t["file"]})
+#                 msg = await ctx.send("Downloading: "+str(t["title"]))
+#                 await msg.add_reaction(emoji="📜")
+#             else:
+#                 await ctx.send(f"Failed to find result!")
+#                 return
+#         if len(d) > 0:
+#             dl.add(d)
+#     else:
+#         await ctx.send(f"Download command requires a link or search term.")        
+#     return
+
 
 # def onPlayerStopped(ctx, vc, lastTrackIndex):
 #     guild = getguild(ctx)

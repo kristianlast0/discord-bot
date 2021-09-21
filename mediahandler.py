@@ -52,7 +52,7 @@ class MediaHandler:
             self.tracks[0]["pos"] -= 1
         return(self.getTrackIndex())
 
-    def getDURL(self, link): # get direct url for video.
+    def getDURL(self, link):
         with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':True}) as ydl:
             return(ydl.extract_info(link, download=False)["url"])
 
@@ -60,6 +60,7 @@ class MediaHandler:
         p = self.getFile()
         if self.fileExists(p): 
             print("File based audio!")
+            #os.utime(p, (access_time, modification_time))
             return(p, False)
         else:
             print("Streaming Audio!")
@@ -82,6 +83,14 @@ class MediaHandler:
 
     def nameToPath(self, name):
         return(self.trackPath+re.sub('[^A-Za-z0-9-]+', '', name).lower()+".wav")
+
+    def isLastTrack(self, i):
+        if len(self.tracks) - 1 == i:
+            print("Is finished.")
+            return(True)
+        else:
+            print("Is not finished.")
+            return(False)
     
     def addTrack(self, i):
         track = {
@@ -99,7 +108,7 @@ class MediaHandler:
         return track
 
     def flush(self):
-        self.tracks = [{"type": "queue", "pos": 0}]
+        self.tracks = [{"name":"undefined","type": "queue", "pos": 0}]
 
     def queue(self):
         if len(self.tracks) == 1: return []
