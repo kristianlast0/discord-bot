@@ -54,7 +54,6 @@ class VoiceConnection:
             self.client.play(await encoder(source), after=lambda e:r())
             while self.__playing:
                 await sleep(1)
-
         return self.client
 
     async def stop(self):

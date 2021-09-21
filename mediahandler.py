@@ -10,11 +10,12 @@ import asyncio
 load_dotenv()
  
 class MediaHandler:
-    
+        
     def __init__(self, bitRate):
+        self.emptylist = {"name": "undefined", "type": "queue", "pos": 0, "version":os.getenv("version")}
         self.bitRate = bitRate
         self.download = os.getenv("download")
-        self.tracks = [{"name": "undefined", "type": "queue", "pos": 0}]
+        self.tracks = [self.emptylist]
         self.trackPath = os.getenv("track_path")
 
     def getInfo(self, ctx, search, noplaylist=True): # get all relevant search information in dict form.
@@ -63,6 +64,10 @@ class MediaHandler:
             print("File based audio!")
             #os.utime(p, (access_time, modification_time))
             return(p, False)
+        elif self.fileExists(p+".part"): 
+            print("Partial file based audio!")
+            #os.utime(p, (access_time, modification_time))
+            return(p+".part", False)
         else:
             print("Streaming Audio!")
             return(self.getDURL(self.tracks[self.getTrackIndex()]["link"]), True)
@@ -109,7 +114,7 @@ class MediaHandler:
         return track
 
     def flush(self):
-        self.tracks = [{"name":"undefined","type": "queue", "pos": 0}]
+        self.tracks = [self.emptylist]
 
     def queue(self):
         if len(self.tracks) == 1: return []
