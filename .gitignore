@@ -6,5 +6,6 @@ __pycache__/
 test.py
 ./tts/tts*
 pull.sh
+startup.sh
 ignore
 ignore/*
