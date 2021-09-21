@@ -32,27 +32,27 @@ dl = Downloader()
 guilds = {}
 
 def getguild(ctx): # get guild relevant objects in dict form.
-    #try:
-    id = ctx.message.guild.id
-    p = os.getenv("playlist_path")+str(id)
-    #print(ctx.message.guild)
-    if not os.path.isdir(p):
-        os.mkdir(p)
-    if id in guilds.keys():
-        print("Guild found!")
-        return(guilds.get(id))
-    else:
-        d = {
-            "guild": ctx.message.guild,
-            "voice_connection": VoiceConnection("128")
-        }
-        guilds[id] = d
-        print("Guild added.")
-        #print(guilds)
-        return d
-    # except:
-    #     print("Cannot get guild from this context.")
-    #     return None
+    try:
+        id = ctx.message.guild.id
+        p = os.getenv("playlist_path")+str(id)
+        #print(ctx.message.guild)
+        if not os.path.isdir(p):
+            os.mkdir(p)
+        if id in guilds.keys():
+            print("Guild found!")
+            return(guilds.get(id))
+        else:
+            d = {
+                "guild": ctx.message.guild,
+                "voice_connection": VoiceConnection("128")
+            }
+            guilds[id] = d
+            print("Guild added.")
+            #print(guilds)
+            return d
+    except:
+        print("Cannot get guild from this context.")
+        return None
 
 async def auth(ctx):
     g = getguild(ctx)
