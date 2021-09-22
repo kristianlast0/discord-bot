@@ -79,7 +79,7 @@ async def play(ctx, *search):
         return
     end = v.mh.isLastTrack(v.mh.getTrackIndex())
     if search != ():
-        info = v.mh.getInfo(ctx, (" ").join(search))
+        info = v.mh.getInfo((" ").join(search))
         downloads = []
         for t in info:
             if t:
