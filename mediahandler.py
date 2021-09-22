@@ -26,7 +26,10 @@ class MediaHandler:
             search = "https://www.youtube.com/watch?v=" + "{}".format(search_results[0])
         with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':noplaylist}) as ydl:
             info = ydl.extract_info(search, download=False)
-            i = {"title":info["title"],"link":search, "duration":info["duration"], "is_live":info["is_live"], "file": None}
+            if search.startswith("https://www.youtube.") :
+                i = {"title":info["title"],"link":search, "duration":info["duration"], "is_live":info["is_live"], "file": None}
+            else:
+                i = {"title":info["title"],"link":search, "duration":info["duration"], "is_live": "None", "file": None}
             p = self.nameToPath(i["title"])
             i["file"] = p
             return([i])

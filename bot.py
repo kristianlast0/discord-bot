@@ -338,7 +338,7 @@ async def on_message(message):
     if message.content.startswith(prefix):
         print(message.content)
     if not message.author.bot:
-        if message.content.startswith("https://www.youtube.") or message.content.startswith("https://open.spotify.com/") or message.content.startswith("https://soundcloud.com/"):
+        if message.content.startswith("https://www.youtube.") or message.content.startswith("https://soundcloud.com/"):
             await message.add_reaction(emoji="▶️")
     if message.content.startswith(prefix+'test'):
         params = message.content.split(" ")
