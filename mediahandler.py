@@ -19,7 +19,7 @@ class MediaHandler:
         self.trackPath = os.getenv("track_path")
 
     def getInfo(self, ctx, search, noplaylist=True): # get all relevant search information in dict form.
-        if not search.startswith("https://www.youtube.") or not "/watch?v=" in search: #or not search.startswith("https://open.spotify.com"):
+        if not search.startswith("https://www.youtube.") or not search.startswith("https://open.spotify.com") or not search.startswith("https://soundcloud.com/"):
             print("BS search for: "+search)
             query_string = urllib.parse.urlencode({"search_query": search})
             formatUrl = urllib.request.urlopen("https://www.youtube.com/results?" + query_string)
