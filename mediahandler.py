@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from datetime import datetime
 import asyncio
- 
+
 load_dotenv()
  
 class MediaHandler:
@@ -19,16 +19,14 @@ class MediaHandler:
         self.trackPath = os.getenv("track_path")
 
     def getInfo(self, ctx, search, noplaylist=True): # get all relevant search information in dict form.
-        #try:
-        if not search.startswith("https://youtu"):
+        if not search.startswith("https://www.youtube.") or not "/watch?v=" in search: #or not search.startswith("https://open.spotify.com"):
+            print("BS search for: "+search)
             query_string = urllib.parse.urlencode({"search_query": search})
             formatUrl = urllib.request.urlopen("https://www.youtube.com/results?" + query_string)
             search_results = re.findall(r"watch\?v=(\S{11})", formatUrl.read().decode())
             search = "https://www.youtube.com/watch?v=" + "{}".format(search_results[0])
         with youtube_dl.YoutubeDL({'format': 'bestaudio/best','noplaylist':noplaylist}) as ydl:
             info = ydl.extract_info(search, download=False)
-            #for i in info:
-            #    print(info["id"]+" "+info["title"])
             i = {"title":info["title"],"link":search, "duration":info["duration"], "is_live":info["is_live"], "file": None}
             p = self.nameToPath(i["title"])
             i["file"] = p
@@ -62,12 +60,7 @@ class MediaHandler:
         p = self.getFile()
         if self.fileExists(p): 
             print("File based audio!")
-            #os.utime(p, (access_time, modification_time))
             return(p, False)
-        elif self.fileExists(p+".part"): 
-            print("Partial file based audio!")
-            #os.utime(p, (access_time, modification_time))
-            return(p+".part", False)
         else:
             print("Streaming Audio!")
             return(self.getDURL(self.tracks[self.getTrackIndex()]["link"]), True)
@@ -88,14 +81,12 @@ class MediaHandler:
         return(os.path.isfile(filename))
 
     def nameToPath(self, name):
-        return(self.trackPath+re.sub('[^A-Za-z0-9-]+', '', name).lower()+".wav")
+        return(self.trackPath+re.sub('[^A-Za-z0-9-]+', '', name).lower()+"."+os.getenv("codec"))
 
     def isLastTrack(self, i):
-        if len(self.tracks) - 1 == i:
-            print("Is finished.")
+        if len(self.tracks) - 1 == i or i == 1 and len(self.tracks) == 1:
             return(True)
         else:
-            print("Is not finished.")
             return(False)
     
     def addTrack(self, i):
@@ -137,7 +128,7 @@ class MediaHandler:
         # print(meta)
  
         for metadata in yt_title: pass
-        filename = self.trackPath+re.sub('[^A-Za-z0-9-]+', '', metadata['content']).lower()+".wav"
+        filename = self.trackPath+re.sub('[^A-Za-z0-9-]+', '', metadata['content']).lower()+"."+os.getenv("codec")
  
         if os.path.isfile(filename):
             # print("--- Found existing file, added to queue")
