@@ -4,9 +4,6 @@ from discord.ext import commands,tasks
 import os
 from dotenv import load_dotenv
 import random
-from mediahandler import MediaHandler
-from voiceconnection import VoiceConnection
-from downloader import Downloader
 import pyttsx3
 import os, json
 import pandas as pd
@@ -14,13 +11,18 @@ import json
 from datetime import datetime
 import youtube_dl
 import re, requests, urllib.parse, urllib.request
+from asyncio import sleep
+
+from mediahandler import MediaHandler
+from voiceconnection import VoiceConnection
+from downloader import Downloader
 
 load_dotenv()
 
-# intents = discord.Intents.default()
-# intents.members = True
-# intents.reactions = True
-# intents.messages = True
+intents = discord.Intents.default()
+intents.members = True
+intents.reactions = True
+intents.messages = True
  
 # Get the API token from the .env file.
 DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
@@ -39,7 +41,7 @@ def getguild(ctx): # get guild relevant objects in dict form.
         if not os.path.isdir(p):
             os.mkdir(p)
         if id in guilds.keys():
-            print("Guild found!")
+            #print("Guild found!")
             return(guilds.get(id))
         else:
             d = {
@@ -47,7 +49,7 @@ def getguild(ctx): # get guild relevant objects in dict form.
                 "voice_connection": VoiceConnection("128")
             }
             guilds[id] = d
-            print("Guild added.")
+            #print("Guild added.")
             #print(guilds)
             return d
     except:
@@ -65,7 +67,7 @@ async def reactions(msg, t = "full"):
     if t == "hiddenmenu":
         r = ["🔄", "⏏️", "❌"]
     elif t == "full":
-        r = ["⏯️", "⏹️", "⏮️", "⏭️", "📜", "💀"]
+        r = ["⏯️", "⏹️", "⏮️", "⏭️", "📜", "🗃️", "💀"]
     for react in r:
         await msg.add_reaction(emoji=react)    
 
@@ -77,12 +79,23 @@ async def play(ctx, *search):
         return
     end = v.mh.isLastTrack(v.mh.getTrackIndex())
     if search != ():
-        i = v.mh.getInfo(ctx, (" ").join(search))
-        d = []
-        for t in i:
+        info = v.mh.getInfo(ctx, (" ").join(search))
+        downloads = []
+        for t in info:
             if t:
                 if not t["is_live"] and not os.path.isfile(t["file"]):
-                    d.append({"link":t["link"], "file":t["file"]})
+                    d = {"link":t["link"], "file":t["file"], "prio": int(os.getenv("dlspeed_0"))}
+                    if v.mh.isLastTrack(v.mh.getTrackIndex()) and v.stopped and t["duration"] < 300:
+                        #print("Priority Downlaod: "+t["title"])
+                        d["prio"] = int(os.getenv("dlspeed_2"))
+                    elif t["duration"] > 1500:
+                        d["prio"] = int(os.getenv("dlspeed_0"))
+                    elif len(v.mh.tracks) - v.mh.getTrackIndex() > 1:
+                        d["prio"] = int(os.getenv("dlspeed_0"))
+                    else:
+                        d["prio"] = int(os.getenv("dlspeed_1"))
+                    downloads.append(d)
+                    #print(len(v.mh.tracks) - v.mh.getTrackIndex())
                 v.mh.addTrack(t)
                 if c.is_playing():
                     msg = await ctx.send("Queued: "+t["title"])
@@ -90,11 +103,13 @@ async def play(ctx, *search):
             else:
                 await ctx.send(f"Failed to find result for \"" + search + "\"")
                 return
-        if len(d) > 0:
-            dl.add(d)
+        if len(downloads) > 0:
+            dl.add(downloads)
         if not c.is_playing() and not c.is_paused() and v.stopped:
             if end:
                 v.mh.incTrackIndex()
+            async with ctx.typing():
+                await sleep(5)
             await v.playQueue(ctx)
     else:
         if v.stopped or v.c.is_paused():
@@ -320,8 +335,11 @@ async def emoji(ctx):
 
 @bot.event
 async def on_message(message):
-    #print("on_message event")
-    print(message.content)
+    if message.content.startswith(prefix):
+        print(message.content)
+    if not message.author.bot:
+        if message.content.startswith("https://www.youtube.") and "/watch?v=" in message.content:# or message.content.startswith("https://open.spotify.com/"):
+            await message.add_reaction(emoji="▶️")
     if message.content.startswith(prefix+'test'):
         params = message.content.split(" ")
         if params[1] is not None and ".youtube." not in params[1]:
@@ -335,19 +353,23 @@ async def on_message(message):
 async def on_reaction_add(reaction, user):
     #print("on_reaction_add event")
     #print(user.bot)
-    if not user.bot: # ⏯️ ⏹️ ⏮️ ⏭️ 🔄 📜 ⏏️ ⤴️ ⤵️ 🎲 💀 👍 ⬇️
-        ctx = await bot.get_context(reaction.message, cls=commands.Context)
-        if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('playpause')
-        if str(reaction.emoji) == "⏹️": ctx.command = bot.get_command('stop')
-        if str(reaction.emoji) == "⏭️": ctx.command = bot.get_command('skip')
-        if str(reaction.emoji) == "⏮️": ctx.command = bot.get_command('back')
-        if str(reaction.emoji) == "📜": ctx.command = bot.get_command('queue')
-        if str(reaction.emoji) == "❌": ctx.command = bot.get_command('leave')
-        if str(reaction.emoji) == "🔄": ctx.command = bot.get_command('restart')
-        if str(reaction.emoji) == "⏏️": ctx.command = bot.get_command('flush')
-        if str(reaction.emoji) == "🔗": ctx.command = bot.get_command('link')
-        if str(reaction.emoji) == "💀": ctx.command = bot.get_command('hiddenmenu')
-        await bot.invoke(ctx)
+    if not user.bot: # ⏯️ ⏹️ ⏮️ ⏭️ 🔄 📜 ⏏️ ⤴️ ⤵️ 🎲 💀 👍 ⬇️ 💾 🗃️ ▶️
+            ctx = await bot.get_context(reaction.message, cls=commands.Context)
+            if str(reaction.emoji) == "▶️": ctx.command = bot.get_command('play')
+            if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('playpause')
+            if str(reaction.emoji) == "⏹️": ctx.command = bot.get_command('stop')
+            if str(reaction.emoji) == "⏭️": ctx.command = bot.get_command('skip')
+            if str(reaction.emoji) == "⏮️": ctx.command = bot.get_command('back')
+            if str(reaction.emoji) == "📜": ctx.command = bot.get_command('queue')
+            if str(reaction.emoji) == "🗃️": ctx.command = bot.get_command('playlists')
+            if str(reaction.emoji) == "❌": ctx.command = bot.get_command('leave')
+            if str(reaction.emoji) == "💾": ctx.command = bot.get_command('save')
+            if str(reaction.emoji) == "🔄": ctx.command = bot.get_command('restart')
+            if str(reaction.emoji) == "⏏️": ctx.command = bot.get_command('flush')
+            if str(reaction.emoji) == "🔗": ctx.command = bot.get_command('link')
+            if str(reaction.emoji) == "💀": ctx.command = bot.get_command('hiddenmenu')
+
+            await bot.invoke(ctx)
 
 @bot.event
 async def on_reaction_remove(reaction, user):
@@ -355,12 +377,14 @@ async def on_reaction_remove(reaction, user):
     #print(user.bot)
     if not user.bot:
         ctx = await bot.get_context(reaction.message, cls=commands.Context)
+        if str(reaction.emoji) == "▶️": ctx.command = bot.get_command('play')
         if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('playpause')
         if str(reaction.emoji) == "⏹️": ctx.command = bot.get_command('stop')
         if str(reaction.emoji) == "⏭️": ctx.command = bot.get_command('skip')
         if str(reaction.emoji) == "⏮️": ctx.command = bot.get_command('back')
         if str(reaction.emoji) == "📜": ctx.command = bot.get_command('queue')
         if str(reaction.emoji) == "❌": ctx.command = bot.get_command('leave')
+        if str(reaction.emoji) == "💾": ctx.command = bot.get_command('save')
         if str(reaction.emoji) == "🔄": ctx.command = bot.get_command('restart')
         if str(reaction.emoji) == "⏏️": ctx.command = bot.get_command('flush')
         if str(reaction.emoji) == "🔗": ctx.command = bot.get_command('link')
@@ -380,6 +404,19 @@ while True:
         print("Shit just went south. Restarting.")
 
 ######################################################################################################################################
+
+# @bot.event
+# async def on_message(message):
+#     #print("on_message event")
+#     print(message.content)
+#     if message.content.startswith(prefix+'test'):
+#         params = message.content.split(" ")
+#         if params[1] is not None and ".youtube." not in params[1]:
+#             e = discord.Embed(title=params[1], url="https://youtube.com", description="Manual youtube embed from searched text", color=discord.Color.green())
+#             e.set_thumbnail(url="https://cdn.mos.cms.futurecdn.net/8gzcr6RpGStvZFA2qRt4v6.jpg")
+#             ctx = await bot.get_context(message, cls=commands.Context)
+#             await ctx.send(embed=e)
+#     await bot.process_commands(message)
 
 # @bot.command(name='download', help="⬇️:Preemptively download tracks.")
 # async def download(ctx, *search):
