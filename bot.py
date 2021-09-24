@@ -23,12 +23,19 @@ intents = discord.Intents.default()
 intents.members = True
 intents.reactions = True
 intents.messages = True
+intents.voice_states = True
  
 # Get the API token from the .env file.
 DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
 
 # client = discord.Client(intents=intents)
-prefix = "!" if os.getenv("env") == "prod" else os.getenv("command_prefix")
+if os.getenv("env") == "prod":
+    prefix = "!"
+    BOT_ID = os.getenv("production_id")
+else:
+    prefix = os.getenv("command_prefix")
+    BOT_ID = os.getenv("develop_id")
+
 bot = commands.Bot(command_prefix=prefix)
 dl = Downloader()
 guilds = {}
@@ -41,7 +48,7 @@ def getguild(ctx): # get guild relevant objects in dict form.
         if not os.path.isdir(p):
             os.mkdir(p)
         if id in guilds.keys():
-            #print("Guild found!")
+            #print(guilds.get(id))
             return(guilds.get(id))
         else:
             d = {
@@ -49,34 +56,58 @@ def getguild(ctx): # get guild relevant objects in dict form.
                 "voice_connection": VoiceConnection("128")
             }
             guilds[id] = d
-            #print("Guild added.")
-            #print(guilds)
+            #print(guilds.get(id))
             return d
     except:
         print("Cannot get guild from this context.")
         return None
 
-async def auth(ctx):
+async def auth(ctx, req = False):
     g = getguild(ctx)
     v = g["voice_connection"]
-    if ctx.author.voice and not v.is_connected():
+    u = ctx.author.voice
+    r = False
+
+    if ctx.author.voice and ctx.voice_client:
+        if ctx.author.voice.channel.id == ctx.voice_client.channel.id:
+            r = True
+        elif len(ctx.voice_client.channel.members) == 1:
+            await v.client.move_to(ctx.author.voice.channel)
+            r = True
+        else:
+            r = False
+            if req: await ctx.message.reply("Come to \""+ctx.voice_client.channel.name+"\" if you want to boogie!")
+    elif ctx.author.voice and not ctx.voice_client:
         await v.connect(ctx)
-    return([g, v, v.client])
-    
+        r = True
+    else:
+        r = False
+        if req: await ctx.message.reply("You need to be connected to a voice channel to carry out this command.")
+    return([g, v, r])
+
 async def reactions(msg, t = "full"):
     if t == "hiddenmenu":
         r = ["🔄", "⏏️", "❌"]
     elif t == "full":
-        r = ["⏯️", "⏹️", "⏮️", "⏭️", "📜", "🗃️", "💀"]
+        r = ["⏯️", "⏹️", "⏮️", "⏭️", "📜", "🗃️", "💀", "⁉️"]
     for react in r:
         await msg.add_reaction(emoji=react)    
 
+@bot.command(name='test', help="⏯️:Play/Resume and Pause")
+async def test(ctx):
+    g, v, r = await auth(ctx)
+    await v.disconnect()
+    if r:
+        print("Done ",g, v, r)
+    else:
+        print("Permission denied")
+    return
+
 @bot.command(name='play', help="▶️:Add and play tracks.")
 async def play(ctx, *search):
-    g, v, c = await auth(ctx)
-    if not c:
-        await ctx.send(f"Thats not possible.")
-        return
+    g, v, r = await auth(ctx, True)
+    if not r: return
+    
     end = v.mh.isLastTrack(v.mh.getTrackIndex())
     if search != ():
         info = v.mh.getInfo((" ").join(search))
@@ -97,7 +128,7 @@ async def play(ctx, *search):
                     downloads.append(d)
                     #print(len(v.mh.tracks) - v.mh.getTrackIndex())
                 v.mh.addTrack(t)
-                if c.is_playing():
+                if v.client.is_playing():
                     msg = await ctx.send("Queued: "+t["title"])
                     await msg.add_reaction(emoji="📜")
             else:
@@ -105,33 +136,29 @@ async def play(ctx, *search):
                 return
         if len(downloads) > 0:
             dl.add(downloads)
-        if not c.is_playing() and not c.is_paused() and v.stopped:
+        if not v.client.is_playing() and not v.client.is_paused() and v.stopped:
             if end:
                 v.mh.incTrackIndex()
             async with ctx.typing():
                 await sleep(5)
             await v.playQueue(ctx)
-    else:
-        if v.stopped or v.c.is_paused():
+    elif v.stopped or v.client.is_paused():
             await v.playPause(ctx)
-    return
+    else:
+        pass
 
 @bot.command(name='playpause', help="⏯️:Play/Resume and Pause")
 async def playpause(ctx):
-    g, v, c = await auth(ctx)
-    if not c:
-        await ctx.send(f"Thats not possible.")
-        return
+    g, v, r = await auth(ctx, True)
+    if not r: return
     await v.playPause(ctx)
     return
 
 @bot.command(name='stop' ,help="⏹️:Stop playing current track.")
 async def stop(ctx, arg):
-    g, v, c = await auth(ctx)
-    if not c:
-        await ctx.send(f"Thats not possible.")
-        return
-    if c.is_playing() or c.is_paused():
+    g, v, r = await auth(ctx, True)
+    if not r: return
+    if v.client.is_playing() or v.client.is_paused():
         async with ctx.typing():
             await v.stop()
         msg = await ctx.send("**[Stopped]**")
@@ -142,10 +169,8 @@ async def stop(ctx, arg):
 
 @bot.command(name='skip', help="⏭️:Skip to next track in queue.")
 async def skip(ctx):
-    g, v, c = await auth(ctx)
-    if not c:
-        await ctx.send(f"Thats not possible.")
-        return
+    g, v, r = await auth(ctx, True)
+    if not r: return
     async with ctx.typing():
         await v.stop()
     v.mh.incTrackIndex()
@@ -154,10 +179,8 @@ async def skip(ctx):
 
 @bot.command(name='back', help="⏮️:Skip backwards through playlist.")
 async def back(ctx):
-    g, v, c = await auth(ctx)
-    if not c:
-        await ctx.send(f"Thats not possible.")
-        return
+    g, v, r = await auth(ctx, True)
+    if not r: return
     async with ctx.typing():
         await v.stop()
     v.mh.decTrackIndex()
@@ -166,10 +189,8 @@ async def back(ctx):
 
 @bot.command(name='restart', help="🔄:Skip backwards through playlist.")
 async def restart(ctx):
-    g, v, c = await auth(ctx)
-    if not c:
-        await ctx.send(f"Thats not possible.")
-        return
+    g, v, r = await auth(ctx, True)
+    if not r: return
     async with ctx.typing():
         await v.stop()
     v.mh.setTrackIndex(1)
@@ -178,7 +199,7 @@ async def restart(ctx):
 
 @bot.command(name='queue', help="📜:Display Queue.")
 async def queue(ctx):
-    g, v, c = await auth(ctx)
+    g, v, r = await auth(ctx)
     trackList = ""
     for idx,track in enumerate(v.mh.queue()):
         if idx > 0:
@@ -190,7 +211,7 @@ async def queue(ctx):
 
 @bot.command(name='playlists', help="Show saved playlists.")
 async def playlists(ctx):
-    g, v, c = await auth(ctx)
+    g, v, r = await auth(ctx)
     json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")+str(g["guild"].id)+"/") if pos_json.endswith('.json')]
     if len(json_files) == 0:
         await ctx.send("**You haven't saved any playlists yet:**\nSave the current queue with: !save \{name\}")
@@ -204,7 +225,7 @@ async def playlists(ctx):
 
 @bot.command(name='save', help="Save current playlist")
 async def save(ctx, *name):
-    g, v, c = await auth(ctx)
+    g, v, r = await auth(ctx)
     name = (" ").join(name)
     if name == "" and v.mh.tracks[0]["name"] == "undefined":
         await ctx.send("**Please enter a name for the playlist**")
@@ -219,10 +240,8 @@ async def save(ctx, *name):
 
 @bot.command(name='load', help="Load a playlist. Example: !load 1")
 async def load(ctx, playlist_index):
-    g, v, c = await auth(ctx)
-    if not c:
-        await ctx.send(f"Thats not possible.")
-        return
+    g, v, r = await auth(ctx, True)
+    if not r: return
     playlist_index = int(playlist_index)-1
     json_files = [pos_json for pos_json in os.listdir(os.getenv("playlist_path")+str(g["guild"].id)+"/") if pos_json.endswith('.json')]
     if len(json_files) == 0:
@@ -230,7 +249,7 @@ async def load(ctx, playlist_index):
     with open(os.getenv("playlist_path")+str(g["guild"].id)+"/"+json_files[playlist_index]) as json_file:
         playlist = json.load(json_file)
         user = ctx.author
-        if c.is_playing(): 
+        if v.client.is_playing(): 
             async with ctx.typing():
                 await v.stop()
         v.mh.tracks = playlist
@@ -241,17 +260,15 @@ async def load(ctx, playlist_index):
 
 @bot.command(name='changename', help="Rename current playlist")
 async def changename(ctx, *name):
-    g, v, c = await auth(ctx)
+    g, v, r = await auth(ctx)
     name = (" ").join(name)
     v.mh.tracks[0]["name"] = name
     return
 
 @bot.command(name="remove", help="Remove a track from queue, use !queue to get track number. Example: !pop 2")
 async def remove(ctx, index):
-    g, v, c = await auth(ctx)
-    if not c:
-        await ctx.send(f"Thats not possible.")
-        return
+    g, v, r = await auth(ctx, True)
+    if not r: return
     index = int(index)
     if index >= 0 and index <= len(v.mh.tracks) - 1:
         msg = await ctx.send("**[Removed:] **"+v.mh.tracks[index]["title"])
@@ -275,10 +292,8 @@ async def remove(ctx, index):
 
 @bot.command(name='flush', help='⏏️:Flush queue of all songs.')
 async def flush(ctx):
-    g, v, c = await auth(ctx)
-    if not c:
-        await ctx.send(f"Thats not possible.")
-        return
+    g, v, r = await auth(ctx, True)
+    if not r: return
     async with ctx.typing():
         await v.stop()
     v.mh.flush()
@@ -287,26 +302,22 @@ async def flush(ctx):
 
 @bot.command(name='link', help='🔗:Link current track.')
 async def link(ctx):
-    g, v, c = await auth(ctx)
+    g, v, r = await auth(ctx)
     await ctx.send(str(v.mh.getLink()))
     return
 
 @bot.command(name='join', category="Media Control", help="Bot will join the channel.")
 async def join(ctx):
-    g, v, c = await auth(ctx)
-    if not c:
-        await ctx.send(f"Thats not possible.")
-        return
+    g, v, r = await auth(ctx, True)
+    if not r: return
     msg = await ctx.send("Lets Go!")
     await reactions(msg)
     return
 
 @bot.command(name='leave', help="❌:Force bot to leave channel.")
 async def leave(ctx):
-    g, v, c = await auth(ctx)
-    if not c:
-        await ctx.send(f"Thats not possible.")
-        return
+    g, v, r = await auth(ctx, True)
+    if not r: return
     voice_client = ctx.message.guild.voice_client
     if voice_client.is_connected():
         await v.stop()
@@ -334,61 +345,50 @@ async def emoji(ctx):
         await bot.add_reaction(msg, emoji)
 
 @bot.event
+async def on_voice_state_change(member, before, after):
+    print(member, before, after)
+    return
+
+@bot.event
 async def on_message(message):
     if message.content.startswith(prefix):
         print(message.content)
     if not message.author.bot:
         if message.content.startswith("https://www.youtube.") or message.content.startswith("https://soundcloud.com/"):
             await message.add_reaction(emoji="▶️")
-    if message.content.startswith(prefix+'test'):
-        params = message.content.split(" ")
-        if params[1] is not None and ".youtube." not in params[1]:
-            e = discord.Embed(title=params[1], url="https://youtube.com", description="Manual youtube embed from searched text", color=discord.Color.green())
-            e.set_thumbnail(url="https://cdn.mos.cms.futurecdn.net/8gzcr6RpGStvZFA2qRt4v6.jpg")
-            ctx = await bot.get_context(message, cls=commands.Context)
-            await ctx.send(embed=e)
+    # if message.content.startswith(prefix+'test'):
+    #     params = message.content.split(" ")
+    #     if params[1] is not None and ".youtube." not in params[1]:
+    #         e = discord.Embed(title=params[1], url="https://youtube.com", description="Manual youtube embed from searched text", color=discord.Color.green())
+    #         e.set_thumbnail(url="https://cdn.mos.cms.futurecdn.net/8gzcr6RpGStvZFA2qRt4v6.jpg")
+    #         ctx = await bot.get_context(message, cls=commands.Context)
+    #         await ctx.send(embed=e)
     await bot.process_commands(message)
 
 @bot.event
 async def on_reaction_add(reaction, user):
-    #print("on_reaction_add event")
-    #print(user.bot)
-    if not user.bot: # ⏯️ ⏹️ ⏮️ ⏭️ 🔄 📜 ⏏️ ⤴️ ⤵️ 🎲 💀 👍 ⬇️ 💾 🗃️ ▶️
-            ctx = await bot.get_context(reaction.message, cls=commands.Context)
-            if str(reaction.emoji) == "▶️": ctx.command = bot.get_command('play')
-            if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('playpause')
-            if str(reaction.emoji) == "⏹️": ctx.command = bot.get_command('stop')
-            if str(reaction.emoji) == "⏭️": ctx.command = bot.get_command('skip')
-            if str(reaction.emoji) == "⏮️": ctx.command = bot.get_command('back')
-            if str(reaction.emoji) == "📜": ctx.command = bot.get_command('queue')
-            if str(reaction.emoji) == "🗃️": ctx.command = bot.get_command('playlists')
-            if str(reaction.emoji) == "❌": ctx.command = bot.get_command('leave')
-            if str(reaction.emoji) == "💾": ctx.command = bot.get_command('save')
-            if str(reaction.emoji) == "🔄": ctx.command = bot.get_command('restart')
-            if str(reaction.emoji) == "⏏️": ctx.command = bot.get_command('flush')
-            if str(reaction.emoji) == "🔗": ctx.command = bot.get_command('link')
-            if str(reaction.emoji) == "💀": ctx.command = bot.get_command('hiddenmenu')
-
-            await bot.invoke(ctx)
-
-@bot.event
-async def on_reaction_remove(reaction, user):
-    #print("on_reaction_remove event")
-    #print(user.bot)
+    reactions = ["⏯️", "⏹️", "⏮️", "⏭️", "🔄", "📜", "⏏️", "⤴️", "⤵️", "🎲", "💀", "👍", "💾", "🗃️", "▶️", "⁉️", "🔗"]
     if not user.bot:
         ctx = await bot.get_context(reaction.message, cls=commands.Context)
-        if str(reaction.emoji) == "▶️": ctx.command = bot.get_command('play')
-        if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('playpause')
-        if str(reaction.emoji) == "⏹️": ctx.command = bot.get_command('stop')
-        if str(reaction.emoji) == "⏭️": ctx.command = bot.get_command('skip')
-        if str(reaction.emoji) == "⏮️": ctx.command = bot.get_command('back')
+        if user.voice:
+            for m in user.voice.channel.members:
+                if str(m.id) == str(BOT_ID):
+                    if str(reaction.emoji) == "▶️": ctx.command = bot.get_command('play')
+                    if str(reaction.emoji) == "⏯️": ctx.command = bot.get_command('playpause')
+                    if str(reaction.emoji) == "⏹️": ctx.command = bot.get_command('stop')
+                    if str(reaction.emoji) == "⏭️": ctx.command = bot.get_command('skip')
+                    if str(reaction.emoji) == "⏮️": ctx.command = bot.get_command('back')
+                    if str(reaction.emoji) == "❌": ctx.command = bot.get_command('leave')
+                    #if str(reaction.emoji) == "💾": ctx.command = bot.get_command('save')
+                    if str(reaction.emoji) == "🔄": ctx.command = bot.get_command('restart')
+                    if str(reaction.emoji) == "⏏️": ctx.command = bot.get_command('flush')
+                    if str(reaction.emoji) == "💀": ctx.command = bot.get_command('hiddenmenu')
+                    if str(reaction.emoji) == "⁉️": ctx.command = bot.get_command('help')
         if str(reaction.emoji) == "📜": ctx.command = bot.get_command('queue')
-        if str(reaction.emoji) == "❌": ctx.command = bot.get_command('leave')
-        if str(reaction.emoji) == "💾": ctx.command = bot.get_command('save')
-        if str(reaction.emoji) == "🔄": ctx.command = bot.get_command('restart')
-        if str(reaction.emoji) == "⏏️": ctx.command = bot.get_command('flush')
+        if str(reaction.emoji) == "🗃️": ctx.command = bot.get_command('playlists')
         if str(reaction.emoji) == "🔗": ctx.command = bot.get_command('link')
-        if str(reaction.emoji) == "💀": ctx.command = bot.get_command('hiddenmenu')
+        if ctx.me and str(reaction.emoji) in reactions:
+            await reaction.remove(user)
         await bot.invoke(ctx)
 
 @bot.event
@@ -402,136 +402,3 @@ while True:
         break
     except ValueError:
         print("Shit just went south. Restarting.")
-
-######################################################################################################################################
-
-# @bot.event
-# async def on_message(message):
-#     #print("on_message event")
-#     print(message.content)
-#     if message.content.startswith(prefix+'test'):
-#         params = message.content.split(" ")
-#         if params[1] is not None and ".youtube." not in params[1]:
-#             e = discord.Embed(title=params[1], url="https://youtube.com", description="Manual youtube embed from searched text", color=discord.Color.green())
-#             e.set_thumbnail(url="https://cdn.mos.cms.futurecdn.net/8gzcr6RpGStvZFA2qRt4v6.jpg")
-#             ctx = await bot.get_context(message, cls=commands.Context)
-#             await ctx.send(embed=e)
-#     await bot.process_commands(message)
-
-# @bot.command(name='download', help="⬇️:Preemptively download tracks.")
-# async def download(ctx, *search):
-#     g, v, c = await auth(ctx)
-#     #print(search)
-#     if search != ():
-#         i = v.mh.getInfo(ctx, (" ").join(search), False)
-#         d = []
-#         for t in i:
-#             if t:
-#                 if not t["is_live"] and not os.path.isfile(t["file"]):
-#                     d.append({"link":t["link"], "file":t["file"]})
-#                 msg = await ctx.send("Downloading: "+str(t["title"]))
-#                 await msg.add_reaction(emoji="📜")
-#             else:
-#                 await ctx.send(f"Failed to find result!")
-#                 return
-#         if len(d) > 0:
-#             dl.add(d)
-#     else:
-#         await ctx.send(f"Download command requires a link or search term.")        
-#     return
-
-
-# def onPlayerStopped(ctx, vc, lastTrackIndex):
-#     guild = getguild(ctx)
-#     voice = guild['voice_connection'].getClient(ctx)
-#     print("onPlayerStopped")
-#     if mh.stopped == False:
-#         mh.endTrack(lastTrackIndex)
-#         if mh.hasNextTrack == True and lastTrackIndex < (len(mh.tracks)-1):
-#             mh.next()
-#             playTrack(ctx, vc, mh.currentTrackIndex)
-
-# def playTrack(ctx, vc, trackIndex):
-#     guild = getguild(ctx)
-#     if not vc.is_playing():
-#         guild['media_handler'].startTrack(trackIndex)
-#         source = discord.FFmpegPCMAudio(guild['media_handler'].currentTrack['filepath'])
-#         vc.play(source, after=lambda e:r())
-#         # guild['media_handler'].stopped = False
-
-# def r():
-#     print('stopped')
-#     return True
-
-# @bot.command(name='play', help="Play a song from youtube. Links can be used as well as names of songs. Not providing an argument will just resume playing from current location in playlist.")
-# async def play(ctx, *search):
-#     search = (" ").join(search)
-#     guild = getguild(ctx)
-#     vc = await guild['voice_connection'].getClient(ctx)
-
-#     print(search)
-#     print(search)
-#     print(search)
- 
-#     if search != "":
-#         print(search)
-#         added_track = await guild['media_handler'].addTrack(guild['media_handler'], search)
-#         if guild['media_handler'].currentTrack['completed_at'] is not None and guild['media_handler'].hasNextTrack == True:
-#             guild['media_handler'].next()
-#         msg = await ctx.send(f"Queued: **{added_track['title']}**")
-#         reactions = ["⬅️", "➡️"]
-#         for react in reactions:
-#             await msg.add_reaction(emoji=react)
-#         playTrack(ctx, vc, guild['media_handler'].currentTrackIndex)
-#     elif search == "":
-#         if guild['media_handler'].stopped == True and not vc.is_playing():
-#             playTrack(ctx, vc, guild['media_handler'].currentTrackIndex)
-#         if guild['media_handler'].stopped == False and vc.is_paused():
-#             await vc.resume()
-
-# @bot.command(name="pop", help="Remove a track from queue, use !queue to get track number. Example: !pop 2")
-# async def pop(ctx, index):
-#     index = int(index) - 1
-#     if index >= 0 and index <= len(mh.tracks):
-#         if index == mh.currentTrackIndex:
-#             print("Pop current track")
-#             voice_client = ctx.message.guild.voice_client
-#             if voice_client.is_playing():
-#                 mh.stopped = True
-#                 voice_client.stop()
-#             mh.tracks.pop(index)
-#             await play(ctx)
-#         if index < mh.currentTrackIndex:
-#             print("popping previos track")
-#             mh.tracks.pop(index)
-#             mh.currentTrackIndex -= 1
-#         if index > mh.currentTrackIndex:
-#             print("Popping future track")
-#             mh.tracks.pop(index)
-#     else:
-#         await ctx.send("Are you fucking with me?")
-
-# @bot.command(name='welcome', help="Trigger the bots welcome message.")
-# async def welcome(ctx):
-#     from datastore import welcome_messages as wm
-#     vc = ctx.message.guild.voice_client
-#     x = random.choice(list(wm.items()))
-#     print(x[0], ">", x[1])
-
-#     path = os.getenv("tts_path") + x[0] + ".mp3"
-#     if os.path.exists(path) and os.path.isfile(path):
-#         print("TTS file exists, playing from disc.")
-#         vc.play(discord.FFmpegPCMAudio(path))
-#     else:
-#         print("TTS does not yet exist, creating!")
-#         engine = pyttsx3.init()
-#         engine.save_to_file(x[1], path)
-#         engine.runAndWait()
-#         vc.play(discord.FFmpegPCMAudio(path))
- 
-# @bot.command(name='insult', help="The bot is an asshole.")
-# async def insult(ctx):
-#     from datastore import insult_adj as adj
-#     from datastore import insult_noun as noun
-#     i = "You " + random.choice (adj) + " " + random.choice (noun)
-#     await ctx.send(i)

@@ -27,6 +27,19 @@ class VoiceConnection:
         await self.client.disconnect()
         return
 
+    def checkChannelEmpty(self):
+        print(len(self.client.channel.members))
+        if len(self.client.channel.members) > 1:
+            return False
+        else:
+            return True
+
+    def getChannel(self):
+        return(self.client.channel)
+    
+    def getSessionid(self):
+        return(self.client.session_id)
+
     async def playQueue(self, ctx, opus = True):
         if opus: encoder = discord.FFmpegOpusAudio.from_probe
         else: encoder = discord.FFmpegPCMAudio
@@ -69,10 +82,10 @@ class VoiceConnection:
         elif self.client.is_paused():
             self.client.resume()
             await ctx.send("Music unpaused.")
-        elif self.stopped:
+        elif self.stopped and len(self.mh.tracks) > 1:
             await self.playQueue(ctx)
         else:
-            await ctx.send("The bot is not playing anything at the moment.")
+            await ctx.send("The bot cannot playing anything at the moment. Is the playlist empty?")
         return
 
     # async def playQueueOld(self, ctx, opus = True):
