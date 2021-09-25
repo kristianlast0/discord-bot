@@ -366,7 +366,7 @@ async def on_message(message):
 
 @bot.event
 async def on_reaction_add(reaction, user):
-    reactions = ["⏯️", "⏹️", "⏮️", "⏭️", "🔄", "📜", "⏏️", "⤴️", "⤵️", "🎲", "💀", "👍", "💾", "🗃️", "▶️", "⁉️", "🔗"]
+    reactions = ["⏯️", "⏹️", "⏮️", "⏭️", "🔄", "📜", "⏏️", "💀", "💾", "🗃️", "▶️", "⁉️", "🔗"]
     if not user.bot:
         ctx = await bot.get_context(reaction.message, cls=commands.Context)
         if user.voice:
