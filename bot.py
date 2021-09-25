@@ -24,16 +24,15 @@ intents.members = True
 intents.reactions = True
 intents.messages = True
 intents.voice_states = True
- 
-# Get the API token from the .env file.
-DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
 
 # client = discord.Client(intents=intents)
 if os.getenv("env") == "prod":
+    DISCORD_TOKEN = os.getenv("discord_token")
     prefix = "!"
     BOT_ID = os.getenv("production_id")
 else:
-    prefix = os.getenv("command_prefix")
+    DISCORD_TOKEN = os.getenv("develop_token")
+    prefix = os.getenv("develop_prefix")
     BOT_ID = os.getenv("develop_id")
 
 bot = commands.Bot(command_prefix=prefix)
@@ -399,6 +398,5 @@ while True:
     try:
         if __name__ == "__main__" :
             bot.run(DISCORD_TOKEN)
-        break
     except ValueError:
         print("Shit just went south. Restarting.")

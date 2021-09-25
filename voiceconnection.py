@@ -27,8 +27,7 @@ class VoiceConnection:
         await self.client.disconnect()
         return
 
-    def checkChannelEmpty(self):
-        print(len(self.client.channel.members))
+    def checkChannelEmpty(self): # This returns just bot until member reconnects. Useless.
         if len(self.client.channel.members) > 1:
             return False
         else:
