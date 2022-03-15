@@ -43,7 +43,7 @@ def getguild(ctx): # get guild relevant objects in dict form.
     try:
         id = ctx.message.guild.id
         p = os.getenv("playlist_path")+str(id)
-        #print(ctx.message.guild)
+        print(ctx.message.guild)
         if not os.path.isdir(p):
             os.mkdir(p)
         if id in guilds.keys():
@@ -66,6 +66,7 @@ async def auth(ctx, req = False):
     v = g["voice_connection"]
     u = ctx.author.voice
     r = False
+    print(g,v,u,r)
 
     if ctx.author.voice and ctx.voice_client:
         if ctx.author.voice.channel.id == ctx.voice_client.channel.id:
@@ -307,7 +308,10 @@ async def link(ctx):
 
 @bot.command(name='join', category="Media Control", help="Bot will join the channel.")
 async def join(ctx):
-    g, v, r = await auth(ctx, True)
+    try:
+        g, v, r = await auth(ctx, True)
+    except:
+        print("There was and error with auth!")
     if not r: return
     msg = await ctx.send("Lets Go!")
     await reactions(msg)
