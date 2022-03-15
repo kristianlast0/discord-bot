@@ -21,7 +21,7 @@ load_dotenv()
 # intents.members = True
 # intents.reactions = True
 # intents.messages = True
- 
+
 # Get the API token from the .env file.
 DISCORD_TOKEN = os.getenv("discord_token") if os.getenv("env") == "prod" else os.getenv("develop_token")
 
@@ -112,7 +112,7 @@ async def download(ctx, *search):
         if len(d) > 0:
             dl.add(d)
     else:
-        await ctx.send(f"Download command requires a link or search term.")        
+        await ctx.send(f"Download command requires a link or search term.")
     return
 
 @bot.command(name='playpause', help="⏯️:Play/Resume and Pause")
