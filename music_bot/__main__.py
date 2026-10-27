@@ -46,6 +46,11 @@ class MusicBot(commands.Bot):
                     except discord.HTTPException:
                         pass
                 settings.set_player_message(guild.id, None)
+        music = self.get_cog("Music")
+        for guild in self.guilds:
+            if settings.stay(guild.id) and not guild.voice_client:
+                await asyncio.sleep(2)  # let any leftover voice state clear first
+                await music.ensure_stay(guild)
         await self.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="/play"))
 
 

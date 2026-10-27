@@ -13,13 +13,14 @@ YouTube, because bots can't stream Spotify), music files on the laptop, and inte
 | `/radio play <station or URL>` · `list` · `add` · `remove` | Internet radio; saved stations (BBC + UK by default) in `data/stations.json` |
 | `/radio browse` | Private station browser: worldwide stations by country and style, or search (radio-browser.info) |
 | `/radio panel` | Posts a permanent Radio panel (Saved / World / Search buttons) in the music channel |
+| `/247 on [station]` · `off` | 24/7 mode (server managers): stay in the voice channel around the clock, rejoin after restarts, and play the station when the queue is empty |
 | `/musicchannel [#channel]` | Restrict music commands and the player message to one channel |
 | `/pause` `/resume` `/skip` `/stop` `/leave` | Playback control (you need to be in the bot's voice channel) |
 | `/queue [page]` `/nowplaying` | What's playing and what's next |
 | `/volume <0-150>` `/loop <off/track/queue>` `/shuffle` `/remove <n>` `/clear` | Queue tweaks |
 | `/playlist save` · `load` · `list` · `show` · `delete` | Saved playlists (only the creator or a server manager can overwrite or delete one) |
 
-The bot leaves after `IDLE_TIMEOUT` seconds (default 5 minutes) of nothing playing or nobody listening.
+The bot leaves after `IDLE_TIMEOUT` seconds (default 5 minutes) of nothing playing or nobody listening, unless 24/7 mode is on.
 
 ## First-time setup
 

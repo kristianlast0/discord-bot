@@ -1,4 +1,5 @@
 """Slash commands. Replies are private (ephemeral); the live player message is the only public post."""
+import asyncio
 import logging
 import random
 
@@ -6,13 +7,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from . import library, playlists, radio, settings, tracks
+from . import config, library, playlists, radio, settings, tracks
 from .models import Track, TrackError, UserError, fmt_duration
 from .player import GuildPlayer
 from .radio_ui import RadioBrowser, RadioPanel
 
 log = logging.getLogger(__name__)
 _PAGE = 10
+_REJOIN_DELAY = 10  # seconds after an unexpected disconnect in 24/7 mode
 
 
 def _requester(interaction: discord.Interaction) -> str:
@@ -37,6 +39,7 @@ class Music(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.players: dict[int, GuildPlayer] = {}
+        self._closing = False
 
     def player(self, guild: discord.Guild) -> GuildPlayer:
         if guild.id not in self.players:
@@ -56,6 +59,9 @@ class Music(commands.Cog):
         voice = getattr(interaction.user, "voice", None)
         if not voice or not voice.channel:
             raise UserError("Join a voice channel first.")
+        stay = settings.stay(interaction.guild_id)
+        if stay and voice.channel.id != stay["channel"]:
+            raise UserError(f"I'm in 24/7 mode in <#{stay['channel']}>. Join me there.")
         p = self.player(interaction.guild)
         vc = p.voice
         if vc and vc.is_connected() and vc.channel != voice.channel and p.active:
@@ -73,6 +79,11 @@ class Music(commands.Cog):
         p = self.player(interaction.guild)
         await p.connect(channel)
         p.channel = interaction.channel
+        if p.current and p.current.filler:  # music takes over from the 24/7 station
+            position = p.add(found, front=True)
+            p.skip()
+            await interaction.followup.send(f"▶️ {_summary(found, position, True)}", ephemeral=True)
+            return
         starting = p.current is None and not p.active and not p.queue
         position = p.add(found, front=front)
         if not starting:
@@ -236,12 +247,22 @@ class Music(commands.Cog):
         p = self._control(interaction)
         p.check_in_charge(interaction.user, [p.current, *p.queue], "stop everyone's music")
         p.stop()
-        await _reply(interaction, "⏹️ Stopped and cleared the queue.")
+        if (settings.stay(interaction.guild_id) or {}).get("station"):
+            await _reply(interaction, "⏹️ Cleared the queue. The 24/7 station will carry on (`/247 off` to silence it).")
+        else:
+            await _reply(interaction, "⏹️ Stopped and cleared the queue.")
 
     @app_commands.command(description="Stop and leave the voice channel")
     @app_commands.guild_only()
     async def leave(self, interaction: discord.Interaction):
         p = self._control(interaction)
+        if settings.stay(interaction.guild_id):
+            if not interaction.user.guild_permissions.manage_guild:
+                raise UserError("I'm in 24/7 mode, so only a server manager can make me leave.")
+            settings.set_stay(interaction.guild_id, None)
+            await p.leave()
+            await _reply(interaction, "👋 Turned off 24/7 mode and left the voice channel.")
+            return
         p.check_in_charge(interaction.user, [p.current, *p.queue], "make me leave")
         await p.leave()
         await _reply(interaction, "👋 Left the voice channel.")
@@ -359,7 +380,9 @@ class Music(commands.Cog):
         existing = playlists.get(interaction.guild_id, name)
         if existing:
             self._check_owner(interaction, existing[1])
-        to_save = current + p.queue
+        to_save = [t for t in current + p.queue if not t.filler]
+        if not to_save:
+            raise UserError("Only the 24/7 station is playing. Queue some music to save a playlist.")
         playlists.save(interaction.guild_id, name, interaction.user.id, to_save)
         kept = min(len(to_save), playlists.MAX_TRACKS)
         await _reply(interaction, f"💾 Saved **{name.strip()}** ({kept} tracks).")
@@ -414,7 +437,73 @@ class Music(commands.Cog):
         playlists.delete(interaction.guild_id, name)
         await _reply(interaction, f"🗑️ Deleted **{saved[0]}**.")
 
+    # ── 24/7 mode ───────────────────────────────────────────────────
+
+    stay_group = app_commands.Group(
+        name="247", description="Keep the bot in a voice channel around the clock", guild_only=True,
+        default_permissions=discord.Permissions(manage_guild=True),
+    )
+
+    @stay_group.command(name="on", description="Stay in your voice channel 24/7, optionally playing a station when the queue is empty")
+    @app_commands.describe(station="A saved station to play whenever nothing else is queued (leave empty for silence)")
+    async def stay_on(self, interaction: discord.Interaction, station: str | None = None):
+        voice = getattr(interaction.user, "voice", None)
+        if not voice or not voice.channel:
+            raise UserError("Join the voice channel you want me to stay in first.")
+        if station:
+            station = radio.track_for(station, None).title.removeprefix("📻 ")  # validates; uses the saved spelling
+        p = self.player(interaction.guild)
+        vc = p.voice
+        if vc and vc.is_connected() and vc.channel != voice.channel and p.active and not (p.current and p.current.filler):
+            raise UserError(f"I'm playing in {vc.channel.mention} right now. Try again when that's finished, or join me there.")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        settings.set_stay(interaction.guild_id, voice.channel.id, station)
+        await p.connect(voice.channel)
+        p.channel = interaction.channel
+        p.restart_filler()
+        await p.start()
+        extra = f" When nothing else is queued I'll play **{station}**." if station else ""
+        await interaction.followup.send(
+            f"🕐 24/7 mode on: I'll stay in {voice.channel.mention}, even when it's empty, and rejoin after restarts.{extra}",
+            ephemeral=True,
+        )
+
+    stay_on.autocomplete("station")(_station_autocomplete)
+
+    @stay_group.command(name="off", description="Turn off 24/7 mode (I'll leave after the usual idle time)")
+    async def stay_off(self, interaction: discord.Interaction):
+        if not settings.stay(interaction.guild_id):
+            raise UserError("24/7 mode isn't on.")
+        settings.set_stay(interaction.guild_id, None)
+        self.player(interaction.guild).restart_filler()  # stops the 24/7 station if it's playing
+        await _reply(interaction, f"🕐 24/7 mode off. I'll leave after {config.IDLE_TIMEOUT // 60} minutes of nobody listening.")
+
+    async def ensure_stay(self, guild: discord.Guild) -> None:
+        """In 24/7 mode, be in the chosen channel and playing (the station, if one is set)."""
+        stay = settings.stay(guild.id)
+        if not stay or self._closing:
+            return
+        channel = guild.get_channel(stay["channel"])
+        if not isinstance(channel, (discord.VoiceChannel, discord.StageChannel)):
+            log.warning("24/7 channel %s no longer exists; turning 24/7 mode off", stay["channel"])
+            settings.set_stay(guild.id, None)
+            return
+        p = self.player(guild)
+        try:
+            await p.connect(channel)
+        except Exception:
+            log.exception("Couldn't rejoin %s for 24/7 mode", channel)
+            return
+        await p.start()
+
+    async def _rejoin_later(self, guild: discord.Guild) -> None:
+        await asyncio.sleep(_REJOIN_DELAY)
+        if not guild.voice_client:
+            log.info("Rejoining voice in %s (24/7 mode)", guild.name)
+            await self.ensure_stay(guild)
+
     async def shutdown(self) -> None:
+        self._closing = True
         for p in self.players.values():
             if p.voice:
                 await p.leave()
@@ -427,6 +516,8 @@ class Music(commands.Cog):
             p = self.players.get(member.guild.id)
             if p:
                 p.reset()
+            if settings.stay(member.guild.id) and not self._closing:
+                asyncio.create_task(self._rejoin_later(member.guild))
 
 
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):

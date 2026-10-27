@@ -11,7 +11,7 @@ import time
 
 import discord
 
-from . import config, settings, tracks
+from . import config, radio, settings, tracks
 from .models import Track, TrackError, UserError, fmt_duration
 
 log = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ _IDLE_CHECK = 15  # seconds
 _QUICK_FAIL = 3  # a track that ends this fast didn't really play
 _NOTICE_LIFETIME = 30  # seconds before warnings delete themselves
 _LOOP_NEXT = {"off": "track", "track": "queue", "queue": "off"}
+_FILLER_RETRY_MAX = 300  # seconds between attempts when the 24/7 station is down
 
 
 class YtdlpAudio(discord.FFmpegPCMAudio):
@@ -155,6 +156,9 @@ class GuildPlayer:
         self._message: discord.Message | None = None  # the live player message
         self._message_lock = asyncio.Lock()
         self._controls: PlayerControls | None = None
+        self._filler_failures = 0
+        self._filler_retry_at = 0.0
+        self._filler_retry_task: asyncio.Task | None = None
 
     @property
     def voice(self) -> discord.VoiceClient | None:
@@ -196,7 +200,7 @@ class GuildPlayer:
             return True
         if not any(m.id != member.id for m in self.listeners()):
             return True
-        return all(t.requester_id == member.id for t in affected if t)
+        return all(t.requester_id == member.id for t in affected if t and not t.filler)
 
     def can_skip_now(self, member: discord.Member) -> bool:
         return self.in_charge(member, [self.current])
@@ -301,12 +305,15 @@ class GuildPlayer:
             vc = self.voice
             if not vc or not vc.is_connected() or self.current or self.active:
                 return
-            while self.queue:
+            while self.queue or self._queue_filler():
                 track = self.queue.pop(0)
                 try:
                     playable = await tracks.stream_for(track)
                 except TrackError as e:
-                    await self.notice(f"⚠️ Skipped **{track.title}**: {e}")
+                    if track.filler:
+                        await self._filler_failed(str(e))
+                    else:
+                        await self.notice(f"⚠️ Skipped **{track.title}**: {e}")
                     continue
                 except Exception:
                     log.exception("Couldn't resolve %r", track)
@@ -338,6 +345,39 @@ class GuildPlayer:
                 return
             await self.clear_player()  # queue finished
 
+    def _queue_filler(self) -> bool:
+        """In 24/7 mode with a station, queue the station when nothing else is queued."""
+        stay = settings.stay(self.guild_id)
+        if not stay or not stay.get("station") or time.monotonic() < self._filler_retry_at:
+            return False
+        try:
+            track = radio.track_for(stay["station"], None)
+        except TrackError:  # the station was removed from the list
+            return False
+        track.filler = True
+        self.queue.append(track)
+        return True
+
+    async def _filler_failed(self, reason: str) -> None:
+        """Back off (15 s, 30 s, ... 5 min) instead of hammering a station that's down."""
+        self._filler_failures += 1
+        delay = min(_FILLER_RETRY_MAX, 15 * 2 ** (self._filler_failures - 1))
+        self._filler_retry_at = time.monotonic() + delay
+        if self._filler_failures == 1:
+            await self.notice(f"⚠️ The 24/7 station isn't working ({reason}). I'll keep trying.", lifetime=120)
+        if not self._filler_retry_task or self._filler_retry_task.done():
+            self._filler_retry_task = asyncio.create_task(self._retry_filler(delay))
+
+    async def _retry_filler(self, delay: float) -> None:
+        await asyncio.sleep(delay + 1)
+        await self.start()
+
+    def restart_filler(self) -> None:
+        """After 24/7 settings change: forget past failures, and swap out the old station if it's playing."""
+        self._filler_failures, self._filler_retry_at = 0, 0.0
+        if self.current and self.current.filler:
+            self.skip()
+
     def prefetch(self) -> None:
         """Look up the next YouTube track in the background, so it starts quickly."""
         upcoming = self.queue[0] if self.queue else None
@@ -356,9 +396,17 @@ class GuildPlayer:
         skipped, self._skipping = self._skipping, False
         if self._stopping:
             self._stopping = False
-            await self.clear_player()
+            if (settings.stay(self.guild_id) or {}).get("station"):
+                await self.start()  # back to the 24/7 station
+            else:
+                await self.clear_player()
             return
-        if finished:
+        if finished and finished.filler:
+            if not skipped and self.elapsed < _QUICK_FAIL:
+                await self._filler_failed("it stopped straight away")
+            elif not skipped:
+                self._filler_failures = 0
+        elif finished:
             quick_fail = not skipped and self.elapsed < _QUICK_FAIL
             if quick_fail:
                 finished.resolved = None  # maybe expired; refetch next time
@@ -436,6 +484,9 @@ class GuildPlayer:
             vc = self.voice
             if not vc or not vc.is_connected():
                 return
+            if settings.stay(self.guild_id):  # 24/7 mode never leaves
+                idle = 0
+                continue
             alone = not any(not m.bot for m in vc.channel.members)
             idle = idle + _IDLE_CHECK if alone or not self.active else 0
             if idle >= config.IDLE_TIMEOUT:
@@ -457,7 +508,9 @@ class GuildPlayer:
             embed.add_field(name="Position", value=f"{fmt_duration(self.elapsed)} / {fmt_duration(track.duration)}")
         else:
             embed.add_field(name="Length", value=fmt_duration(track.duration) if track.duration else "Live")
-        if track.requester:
+        if track.filler:
+            embed.add_field(name="Playing because", value="24/7 mode. `/play` something to take over")
+        elif track.requester:
             embed.add_field(name="Requested by", value=track.requester)
         if self.queue:
             up_next = "\n".join(f"`{i}.` {t.title[:60]}" for i, t in enumerate(self.queue[:3], 1))
@@ -465,6 +518,8 @@ class GuildPlayer:
                 up_next += f"\n…and {len(self.queue) - 3} more"
             embed.add_field(name="Up next", value=up_next, inline=False)
         footer = f"Volume {round(self.volume * 100)}%"
+        if settings.stay(self.guild_id):
+            footer += " · 24/7"
         if self.loop_mode != "off":
             footer += f" · Looping {self.loop_mode}"
         if self.skip_votes:
