@@ -1,8 +1,12 @@
 """One player per server: the queue, playback, the live player message and auto-leave."""
 import asyncio
+import json
 import logging
+import os
 import random
-import shlex
+import subprocess
+import sys
+import tempfile
 import time
 
 import discord
@@ -19,13 +23,49 @@ _NOTICE_LIFETIME = 30  # seconds before warnings delete themselves
 _LOOP_NEXT = {"off": "track", "track": "queue", "queue": "off"}
 
 
-def _before_options(url: str, headers: dict) -> str:
-    if not url.startswith(("http://", "https://")):
-        return ""
-    opts = _NET_BEFORE
-    if headers:
-        opts += " -headers " + shlex.quote("".join(f"{k}: {v}\r\n" for k, v in headers.items()))
-    return opts
+class YtdlpAudio(discord.FFmpegPCMAudio):
+    """yt-dlp downloads the audio (in the small chunks YouTube expects) and pipes it into ffmpeg.
+
+    ffmpeg fetching YouTube URLs itself gets 403 Forbidden most of the time.
+    """
+
+    def __init__(self, info: dict):
+        fd, self._info_path = tempfile.mkstemp(prefix="music-bot-", suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump(info, f)
+        self._ytdlp = subprocess.Popen(
+            [sys.executable, "-m", "yt_dlp", "--quiet", "--no-warnings", "--no-progress",
+             "-f", "bestaudio/best", "--load-info-json", self._info_path, "-o", "-"],
+            stdout=subprocess.PIPE,
+        )
+        try:
+            super().__init__(self._ytdlp.stdout, pipe=True, options="-vn")
+        except Exception:
+            self._stop_ytdlp()
+            raise
+
+    def _stop_ytdlp(self) -> None:
+        if self._ytdlp.poll() is None:
+            self._ytdlp.kill()
+        try:
+            self._ytdlp.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.unlink(self._info_path)
+        except OSError:
+            pass
+
+    def cleanup(self) -> None:
+        self._stop_ytdlp()  # first, so it doesn't complain about ffmpeg closing the pipe
+        super().cleanup()
+
+
+def _audio_for(playable: tracks.Playable) -> discord.AudioSource:
+    if playable.info:
+        return YtdlpAudio(playable.info)
+    remote = playable.url.startswith(("http://", "https://"))
+    return discord.FFmpegPCMAudio(playable.url, before_options=_NET_BEFORE if remote else "", options="-vn")
 
 
 class PlayerControls(discord.ui.View):
@@ -215,7 +255,7 @@ class GuildPlayer:
             while self.queue:
                 track = self.queue.pop(0)
                 try:
-                    url, headers = await tracks.stream_for(track)
+                    playable = await tracks.stream_for(track)
                 except TrackError as e:
                     await self.notice(f"⚠️ Skipped **{track.title}**: {e}")
                     continue
@@ -228,10 +268,12 @@ class GuildPlayer:
                 if not vc or not vc.is_connected():
                     self.queue.insert(0, track)
                     return
-                source = discord.PCMVolumeTransformer(
-                    discord.FFmpegPCMAudio(url, before_options=_before_options(url, headers), options="-vn"),
-                    volume=self.volume,
-                )
+                try:
+                    source = discord.PCMVolumeTransformer(_audio_for(playable), volume=self.volume)
+                except Exception:
+                    log.exception("Couldn't start ffmpeg for %r", track)
+                    await self.notice(f"⚠️ Skipped **{track.title}**: couldn't start the audio.")
+                    continue
                 self.current = track
                 self._started, self._paused_at, self._paused_total = time.monotonic(), None, 0.0
                 try:
@@ -242,8 +284,16 @@ class GuildPlayer:
                     self.queue.insert(0, track)
                     return
                 await self.refresh_player(repost=True)
+                self.prefetch()
                 return
             await self.clear_player()  # queue finished
+
+    def prefetch(self) -> None:
+        """Look up the next YouTube track in the background, so it starts quickly."""
+        upcoming = self.queue[0] if self.queue else None
+        if upcoming and upcoming.kind == "ytdl" and not upcoming.resolved:
+            task = asyncio.create_task(tracks.stream_for(upcoming))
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())  # failures retry when it starts
 
     def _after(self, error: Exception | None) -> None:
         # Runs on the audio thread.
@@ -261,7 +311,7 @@ class GuildPlayer:
         if finished:
             quick_fail = not skipped and self.elapsed < _QUICK_FAIL
             if quick_fail:
-                finished.stream = None  # maybe an expired URL; refetch next time
+                finished.resolved = None  # maybe expired; refetch next time
                 await self.notice(f"⚠️ **{finished.title}** stopped straight away, so I've moved on.")
             elif self.loop_mode == "track" and not skipped:
                 self.queue.insert(0, finished)

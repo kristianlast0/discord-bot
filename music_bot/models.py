@@ -24,8 +24,8 @@ class Track:
     duration: int | None = None  # seconds; None for radio and unknown lengths
     page_url: str | None = None  # link shown in embeds
     requester: str | None = None
-    # (stream URL, HTTP headers, time fetched) from the lookup, reused if the track starts soon after
-    stream: tuple[str, dict, float] | None = field(default=None, repr=False)
+    # (yt-dlp info, time fetched) from the lookup, reused if the track starts soon after
+    resolved: tuple[dict, float] | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict:
         return {

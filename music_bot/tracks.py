@@ -2,6 +2,7 @@
 import asyncio
 import re
 import time
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 import aiohttp
@@ -12,7 +13,7 @@ from .models import Track, TrackError
 
 _URL_RE = re.compile(r"^https?://", re.I)
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-_STREAM_TTL = 3600  # YouTube stream URLs last ~6 hours; refetch well before that
+_INFO_TTL = 3600  # YouTube media URLs in the info last ~6 hours; refetch well before that
 _UNAVAILABLE = {"[Private video]", "[Deleted video]"}
 
 _COMMON = {"quiet": True, "no_warnings": True, "noplaylist": True, "format": "bestaudio/best", "source_address": "0.0.0.0"}
@@ -23,7 +24,7 @@ _STREAM_OPTS = _COMMON
 
 def _extract(query: str, opts: dict) -> dict:
     with yt_dlp.YoutubeDL(opts) as ydl:
-        return ydl.extract_info(query, download=False)
+        return ydl.sanitize_info(ydl.extract_info(query, download=False))
 
 
 async def _ytdl(query: str, opts: dict) -> dict:
@@ -48,9 +49,8 @@ def _from_entry(entry: dict, requester: str | None) -> Track:
         page_url=page if page and page.startswith("http") else None,
         requester=requester,
     )
-    stream_url = entry.get("url")
-    if entry.get("_type", "video") == "video" and stream_url and stream_url != page:
-        track.stream = (stream_url, entry.get("http_headers") or {}, time.time())
+    if entry.get("_type", "video") == "video" and entry.get("formats"):
+        track.resolved = (entry, time.time())
     return track
 
 
@@ -92,14 +92,19 @@ async def _unwrap_playlist_file(url: str) -> str:
     raise TrackError("That playlist file has no stream URLs in it.")
 
 
-async def stream_for(track: Track) -> tuple[str, dict]:
-    """(URL or path for ffmpeg, HTTP headers)."""
+@dataclass
+class Playable:
+    url: str | None = None  # a file path or stream URL ffmpeg opens itself (local files, radio)
+    info: dict | None = None  # yt-dlp info; yt-dlp downloads it, since YouTube refuses ffmpeg's plain requests
+
+
+async def stream_for(track: Track) -> Playable:
     if track.kind == "local":
-        return str(library.resolve(track.source)), {}
+        return Playable(url=str(library.resolve(track.source)))
     if track.kind == "stream":
-        return await _unwrap_playlist_file(track.source), {}
-    if track.stream and time.time() - track.stream[2] < _STREAM_TTL:
-        return track.stream[0], track.stream[1]
+        return Playable(url=await _unwrap_playlist_file(track.source))
+    if track.resolved and time.time() - track.resolved[1] < _INFO_TTL:
+        return Playable(info=track.resolved[0])
 
     info = await _ytdl(track.source, _STREAM_OPTS)
     if info.get("entries") is not None:
@@ -107,9 +112,9 @@ async def stream_for(track: Track) -> tuple[str, dict]:
         if not entries:
             raise TrackError("No YouTube results.")
         info = entries[0]
-    if not info.get("url"):
+    if not info.get("formats") and not info.get("url"):
         raise TrackError("No playable audio found.")
     track.page_url = track.page_url or info.get("webpage_url")
     track.duration = track.duration or _int(info.get("duration"))
-    track.stream = (info["url"], info.get("http_headers") or {}, time.time())
-    return track.stream[0], track.stream[1]
+    track.resolved = (info, time.time())
+    return Playable(info=info)

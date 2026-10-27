@@ -76,6 +76,7 @@ class Music(commands.Cog):
         starting = p.current is None and not p.active and not p.queue
         position = p.add(found, front=front)
         if not starting:
+            p.prefetch()
             await p.refresh_player()
             await interaction.followup.send(f"➕ {_summary(found, position, False)}", ephemeral=True)
             return
@@ -402,6 +403,11 @@ class Music(commands.Cog):
         self._check_owner(interaction, saved[1])
         playlists.delete(interaction.guild_id, name)
         await _reply(interaction, f"🗑️ Deleted **{saved[0]}**.")
+
+    async def shutdown(self) -> None:
+        for p in self.players.values():
+            if p.voice:
+                await p.leave()
 
     # ── Events ──────────────────────────────────────────────────────
 
