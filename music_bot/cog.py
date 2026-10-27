@@ -9,6 +9,7 @@ from discord.ext import commands
 from . import library, playlists, radio, settings, tracks
 from .models import Track, TrackError, UserError, fmt_duration
 from .player import GuildPlayer
+from .radio_ui import RadioBrowser, RadioPanel
 
 log = logging.getLogger(__name__)
 _PAGE = 10
@@ -84,6 +85,25 @@ class Music(commands.Cog):
             return
         await interaction.followup.send(f"▶️ {_summary(found, position, True)}", ephemeral=True)
 
+    async def play_station(self, interaction: discord.Interaction, channel, track: Track) -> str:
+        """Radio replaces radio straight away; during songs it plays next. Returns a status line."""
+        p = self.player(interaction.guild)
+        await p.connect(channel)
+        p.channel = interaction.channel
+        if p.current and p.current.kind == "stream":
+            p.add([track], front=True)
+            p.skip()
+            return f"📻 Switching to **{track.title}**."
+        if p.current or p.active:
+            p.add([track], front=True)
+            await p.refresh_player()
+            return f"📻 **{track.title}** will start after the current track."
+        p.add([track])
+        await p.start()
+        if p.current is not track:
+            raise UserError(f"**{track.title}** isn't working right now. Try another station.")
+        return f"▶️ Playing **{track.title}**."
+
     # ── Setup ───────────────────────────────────────────────────────
 
     @app_commands.command(description="Choose the text channel for music commands and the player")
@@ -129,12 +149,27 @@ class Music(commands.Cog):
     radio_group = app_commands.Group(name="radio", description="Internet radio", guild_only=True)
 
     @radio_group.command(name="play", description="Play an internet radio station")
-    @app_commands.describe(station="A saved station (start typing) or a stream URL", next="Play it next instead of at the end of the queue")
-    async def radio_play(self, interaction: discord.Interaction, station: str, next: bool = False):
+    @app_commands.describe(station="A saved station (start typing) or a stream URL")
+    async def radio_play(self, interaction: discord.Interaction, station: str):
         channel = self._listener_channel(interaction)
         track = radio.track_for(station, _requester(interaction))
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await self._enqueue(interaction, channel, [track], next)
+        await interaction.followup.send(await self.play_station(interaction, channel, track), ephemeral=True)
+
+    @radio_group.command(name="browse", description="Browse radio stations from around the world")
+    async def radio_browse(self, interaction: discord.Interaction):
+        browser = RadioBrowser(self)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await browser.load()
+        await interaction.followup.send(browser.header(), view=browser, ephemeral=True)
+
+    @radio_group.command(name="panel", description="Post the radio panel (buttons anyone can use) in the music channel")
+    @app_commands.default_permissions(manage_guild=True)
+    async def radio_panel(self, interaction: discord.Interaction):
+        channel_id = settings.music_channel(interaction.guild_id)
+        channel = (self.bot.get_channel(channel_id) if channel_id else None) or interaction.channel
+        await channel.send(embed=RadioPanel.embed(), view=RadioPanel(self))
+        await _reply(interaction, f"📻 Posted the radio panel in {channel.mention}. Pin it to keep it handy.")
 
     @radio_play.autocomplete("station")
     async def _station_autocomplete(self, interaction: discord.Interaction, current: str):

@@ -6,6 +6,7 @@ from discord.ext import commands
 
 from . import config
 from .cog import Music, on_app_command_error
+from .radio_ui import RadioPanel
 
 log = logging.getLogger("music_bot")
 
@@ -15,7 +16,9 @@ class MusicBot(commands.Bot):
         super().__init__(command_prefix=commands.when_mentioned, intents=discord.Intents.default(), help_command=None)
 
     async def setup_hook(self):
-        await self.add_cog(Music(self))
+        music = Music(self)
+        await self.add_cog(music)
+        self.add_view(RadioPanel(music))  # keeps panel buttons working after restarts
         self.tree.error(on_app_command_error)
         if config.GUILD_ID:
             guild = discord.Object(config.GUILD_ID)

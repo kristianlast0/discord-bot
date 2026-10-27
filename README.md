@@ -10,7 +10,10 @@ YouTube, because bots can't stream Spotify), music files on the laptop, and inte
 | --- | --- |
 | `/play <song or link> [next]` | YouTube/Spotify/SoundCloud link or playlist, or a YouTube search |
 | `/local <song or folder>` | Files in `~/Music` on the laptop (autocompletes) |
-| `/radio play <station or URL>` · `list` · `add` · `remove` | Internet radio; stations saved in `data/stations.json` |
+| `/radio play <station or URL>` · `list` · `add` · `remove` | Internet radio; saved stations (BBC + UK by default) in `data/stations.json` |
+| `/radio browse` | Private station browser: worldwide stations by country and style, or search (radio-browser.info) |
+| `/radio panel` | Posts a permanent Radio panel (Saved / World / Search buttons) in the music channel |
+| `/musicchannel [#channel]` | Restrict music commands and the player message to one channel |
 | `/pause` `/resume` `/skip` `/stop` `/leave` | Playback control (you need to be in the bot's voice channel) |
 | `/queue [page]` `/nowplaying` | What's playing and what's next |
 | `/volume <0-150>` `/loop <off/track/queue>` `/shuffle` `/remove <n>` `/clear` | Queue tweaks |
