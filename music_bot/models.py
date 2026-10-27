@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from discord import app_commands
+
 
 class TrackError(Exception):
     """A track couldn't be found or played; the message is shown to the user."""
+
+
+class UserError(app_commands.AppCommandError):
+    """Something the user did wrong; shown to them as-is."""
 
 
 @dataclass(eq=False)
