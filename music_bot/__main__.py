@@ -6,7 +6,7 @@ import sys
 import discord
 from discord.ext import commands
 
-from . import config
+from . import config, settings
 from .cog import Music, on_app_command_error
 from .radio_ui import RadioPanel
 
@@ -37,6 +37,15 @@ class MusicBot(commands.Bot):
             if guild.me.voice and guild.me.voice.channel and not guild.voice_client:
                 log.info("Leaving leftover voice connection in %s", guild.me.voice.channel)
                 await guild.change_voice_state(channel=None)
+            leftover = settings.player_message(guild.id)
+            if leftover and not guild.voice_client:
+                channel = self.get_channel(leftover[0])
+                if channel:
+                    try:
+                        await channel.get_partial_message(leftover[1]).delete()
+                    except discord.HTTPException:
+                        pass
+                settings.set_player_message(guild.id, None)
         await self.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="/play"))
 
 

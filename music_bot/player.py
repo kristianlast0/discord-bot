@@ -173,7 +173,7 @@ class GuildPlayer:
         """Only people in the bot's voice channel may change playback."""
         vc = self.voice
         if not vc or not vc.is_connected():
-            raise UserError("I'm not in a voice channel.")
+            raise UserError("I'm not in a voice channel right now. Use `/play` to start some music.")
         voice = getattr(member, "voice", None)
         if not voice or voice.channel != vc.channel:
             raise UserError(f"Join {vc.channel.mention} to control the music.")
@@ -211,6 +211,7 @@ class GuildPlayer:
             await self._delete_message()
             try:
                 self._message = await channel.send(embed=embed, view=self._controls)
+                settings.set_player_message(self.guild_id, self._message.channel.id, self._message.id)
             except discord.HTTPException as e:
                 log.warning("Couldn't post the player message in %s: %s", channel, e)
 
@@ -221,6 +222,7 @@ class GuildPlayer:
     async def _delete_message(self) -> None:
         message, self._message = self._message, None
         if message:
+            settings.set_player_message(self.guild_id, None)
             try:
                 await message.delete()
             except discord.HTTPException:
