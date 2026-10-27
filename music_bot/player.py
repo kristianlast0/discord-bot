@@ -83,6 +83,8 @@ class PlayerControls(discord.ui.View):
         self.loop.label = {"off": "Loop", "track": "Loop: track", "queue": "Loop: queue"}[mode]
         self.loop.style = discord.ButtonStyle.secondary if mode == "off" else discord.ButtonStyle.success
         self.shuffle.disabled = len(self.player.queue) < 2
+        votes = len(self.player.skip_votes)
+        self.skip.label = f"Skip ({votes}/{self.player.skip_votes_needed()})" if votes else "Skip"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         self.player.check_listener(interaction.user)
@@ -109,11 +111,16 @@ class PlayerControls(discord.ui.View):
 
     @discord.ui.button(emoji="⏭️", label="Skip", style=discord.ButtonStyle.secondary)
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.player.skip()  # the next track replaces this message
-        await interaction.response.defer()
+        skipped, message = self.player.vote_skip(interaction.user)
+        if skipped:  # the next track replaces this message
+            await interaction.response.send_message(message, ephemeral=True)
+        else:
+            await self._redraw(interaction)
+            await interaction.followup.send(message, ephemeral=True)
 
     @discord.ui.button(emoji="⏹️", label="Stop", style=discord.ButtonStyle.danger)
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.player.check_in_charge(interaction.user, [self.player.current, *self.player.queue], "stop everyone's music")
         self.player.stop()  # deletes this message
         await interaction.response.defer()
 
@@ -140,6 +147,7 @@ class GuildPlayer:
         self._lock = asyncio.Lock()
         self._skipping = False
         self._stopping = False
+        self.skip_votes: set[int] = set()  # member IDs voting to skip the current track
         self._started = 0.0
         self._paused_at: float | None = None
         self._paused_total = 0.0
@@ -177,6 +185,45 @@ class GuildPlayer:
         voice = getattr(member, "voice", None)
         if not voice or voice.channel != vc.channel:
             raise UserError(f"Join {vc.channel.mention} to control the music.")
+
+    def listeners(self) -> list[discord.Member]:
+        vc = self.voice
+        return [m for m in vc.channel.members if not m.bot] if vc and vc.channel else []
+
+    def in_charge(self, member: discord.Member, affected: list[Track | None]) -> bool:
+        """Server managers, people alone with the bot, and people whose own music it is can act without a vote."""
+        if member.guild_permissions.manage_guild:
+            return True
+        if not any(m.id != member.id for m in self.listeners()):
+            return True
+        return all(t.requester_id == member.id for t in affected if t)
+
+    def can_skip_now(self, member: discord.Member) -> bool:
+        return self.in_charge(member, [self.current])
+
+    def check_in_charge(self, member: discord.Member, affected: list[Track | None], action: str) -> None:
+        if not self.in_charge(member, affected):
+            raise UserError(f"Only a server manager can {action} while other people's music is queued. Use Skip to vote instead.")
+
+    def skip_votes_needed(self) -> int:
+        return len(self.listeners()) // 2 + 1  # more than half the people listening
+
+    def vote_skip(self, member: discord.Member) -> tuple[bool, str]:
+        """Skip now if the member may, otherwise count their vote. Returns (skipped, message for them)."""
+        if not self.current or not self.active:
+            raise UserError("Nothing is playing.")
+        title = self.current.title
+        if self.can_skip_now(member):
+            self.skip()
+            return True, f"⏭️ Skipped **{title}**."
+        present = {m.id for m in self.listeners()}
+        self.skip_votes = (self.skip_votes | {member.id}) & present  # people who left don't count
+        votes, needed = len(self.skip_votes), self.skip_votes_needed()
+        if votes >= needed:
+            self.skip()
+            asyncio.create_task(self.notice(f"⏭️ **{title}** was skipped by vote ({votes}/{needed})."))
+            return True, f"⏭️ Your vote skipped **{title}**."
+        return False, f"🗳️ You voted to skip **{title}** ({votes}/{needed}). Others can vote with the Skip button or `/skip`."
 
     async def notice(self, content: str, lifetime: float | None = _NOTICE_LIFETIME) -> None:
         """A short message in the music channel that deletes itself."""
@@ -277,6 +324,7 @@ class GuildPlayer:
                     await self.notice(f"⚠️ Skipped **{track.title}**: couldn't start the audio.")
                     continue
                 self.current = track
+                self.skip_votes.clear()
                 self._started, self._paused_at, self._paused_total = time.monotonic(), None, 0.0
                 try:
                     vc.play(source, after=self._after)
@@ -419,5 +467,7 @@ class GuildPlayer:
         footer = f"Volume {round(self.volume * 100)}%"
         if self.loop_mode != "off":
             footer += f" · Looping {self.loop_mode}"
+        if self.skip_votes:
+            footer += f" · Skip votes {len(self.skip_votes)}/{self.skip_votes_needed()}"
         embed.set_footer(text=footer)
         return embed

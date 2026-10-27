@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from discord import app_commands
@@ -26,6 +27,11 @@ class Track:
     requester: str | None = None
     # (yt-dlp info, time fetched) from the lookup, reused if the track starts soon after
     resolved: tuple[dict, float] | None = field(default=None, repr=False)
+
+    @property
+    def requester_id(self) -> int | None:
+        match = re.fullmatch(r"<@!?(\d+)>", self.requester or "")
+        return int(match.group(1)) if match else None
 
     def to_dict(self) -> dict:
         return {

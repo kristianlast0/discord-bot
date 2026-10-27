@@ -93,6 +93,9 @@ class Music(commands.Cog):
         p.channel = interaction.channel
         if p.current and p.current.kind == "stream":
             p.add([track], front=True)
+            if not p.can_skip_now(interaction.user):
+                await p.refresh_player()
+                return f"📻 **{track.title}** will start when the current station is skipped. Vote with the Skip button."
             p.skip()
             return f"📻 Switching to **{track.title}**."
         if p.current or p.active:
@@ -218,25 +221,29 @@ class Music(commands.Cog):
         await _reply(interaction, "▶️ Resumed.")
         await p.refresh_player()
 
-    @app_commands.command(description="Skip the current track")
+    @app_commands.command(description="Skip the current track (or vote to, if someone else requested it)")
     @app_commands.guild_only()
     async def skip(self, interaction: discord.Interaction):
         p = self._control(interaction)
-        title = p.current.title if p.current else None
-        if not p.skip():
-            raise UserError("Nothing is playing.")
-        await _reply(interaction, f"⏭️ Skipped **{title}**.")
+        skipped, message = p.vote_skip(interaction.user)
+        await _reply(interaction, message)
+        if not skipped:
+            await p.refresh_player()
 
     @app_commands.command(description="Stop the music and clear the queue")
     @app_commands.guild_only()
     async def stop(self, interaction: discord.Interaction):
-        self._control(interaction).stop()
+        p = self._control(interaction)
+        p.check_in_charge(interaction.user, [p.current, *p.queue], "stop everyone's music")
+        p.stop()
         await _reply(interaction, "⏹️ Stopped and cleared the queue.")
 
     @app_commands.command(description="Stop and leave the voice channel")
     @app_commands.guild_only()
     async def leave(self, interaction: discord.Interaction):
-        await self._control(interaction).leave()
+        p = self._control(interaction)
+        p.check_in_charge(interaction.user, [p.current, *p.queue], "make me leave")
+        await p.leave()
         await _reply(interaction, "👋 Left the voice channel.")
 
     @app_commands.command(description="Set the volume")
@@ -277,6 +284,8 @@ class Music(commands.Cog):
         p = self._control(interaction)
         if position > len(p.queue):
             raise UserError(f"The queue only has {len(p.queue)} tracks.")
+        if not p.in_charge(interaction.user, [p.queue[position - 1]]):
+            raise UserError("Only the person who added that track or a server manager can remove it.")
         removed = p.queue.pop(position - 1)
         await _reply(interaction, f"🗑️ Removed **{removed.title}**.")
         await p.refresh_player()
@@ -285,6 +294,7 @@ class Music(commands.Cog):
     @app_commands.guild_only()
     async def clear(self, interaction: discord.Interaction):
         p = self._control(interaction)
+        p.check_in_charge(interaction.user, p.queue, "clear the queue")
         count = len(p.queue)
         p.queue.clear()
         await _reply(interaction, f"🧹 Cleared {count} tracks from the queue.")
