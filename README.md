@@ -37,7 +37,9 @@ through ffmpeg's `dynaudnorm` (even loudness) and `silenceremove` (no silent int
 bot on `127.0.0.1:8765` and published through ngrok (`deploy/setup-ngrok.sh`, which sets `PUBLIC_URL`). Anyone can
 watch; someone in the bot's voice channel can **Take the decks**, which switches the mixer to live mode: two decks with
 play/cue, pitch (±16%) and nudge, 3-band EQ with kills, a one-knob filter, channel faders, a crossfader (smooth/cut
-curve, auto-fade), master volume, BPM detection (`dsp.py`, cached in `data/bpm.json`) and Sync. If the DJ closes the
+curve, auto-fade), master volume, beat grids (`dsp.py`, cached in `data/beatgrids.json`), Sync (tempo and beat phase), Lock, beat jump, Quantise, and
+click-to-jump waveforms. Finite tracks download whole into `/dev/shm` so decks can jump anywhere; radio streams forwards.
+Automatic mixes beat-match songs within ±8% (`/dj beatmatch`), then ease the pitch back to normal. If the DJ closes the
 page or leaves voice for a minute, it hands back to automatic mixing. Discord's own skip/loop/shuffle buttons are
 disabled while someone is live; `/play` still adds to the queue for the DJ.
 

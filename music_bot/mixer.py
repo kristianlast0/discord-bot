@@ -6,6 +6,8 @@ In live mode a person drives it from the web mixer: per-deck play/cue, faders, E
 import collections
 import logging
 import math
+import os
+import tempfile
 import threading
 import time
 
@@ -29,58 +31,169 @@ def frames(seconds: float) -> int:
     return int(seconds / FRAME_SECONDS)
 
 
-class Deck:
-    """One track's audio. A thread reads ahead from ffmpeg, so the mixer never waits on the network
-    and we learn exactly how much is left once ffmpeg reaches the end."""
+class _FileStore:
+    """The whole track as 16-bit PCM in a temp file (in RAM via /dev/shm for normal-length songs), written by a thread
+    as fast as ffmpeg decodes. Any part that has arrived can be read, so the deck can jump around."""
 
-    def __init__(self, track, audio: discord.AudioSource, lookahead: int):
-        self.track = track
-        self.audio = audio
-        self.playing = True  # live mode loads decks paused ("cued")
-        self.volume = 1.0  # channel fader
-        self.pitch = 1.0  # playback speed; changes tempo and pitch together, like a turntable
-        self.nudge = 0.0
-        self.filters = DeckFilters()
-        self.bpm: float | None = None  # detected tempo at pitch 1.0
-        self.level = 0.0  # loudness after the fader, for the meters
-        self.played = 0  # frames output
-        self.consumed = 0  # source samples used up
-        self.created = time.monotonic()
-        self.eof = False
-        self._buffer: collections.deque[np.ndarray] = collections.deque()
-        self._lookahead = lookahead
+    def __init__(self, audio: discord.AudioSource, title: str, long: bool):
+        folder = "/dev/shm" if os.path.isdir("/dev/shm") and not long else None
+        self._fd, self._path = tempfile.mkstemp(prefix="music-bot-deck-", suffix=".pcm", dir=folder)
+        self._audio = audio
+        self._lock = threading.Lock()
         self._closed = False
+        self.written = 0  # samples
+        self.done = False
+        threading.Thread(target=self._fill, name=f"deck-{title[:20]}", daemon=True).start()
+
+    def _fill(self) -> None:
+        try:
+            while not self._closed:
+                data = self._audio.read()
+                if not data:
+                    break
+                with self._lock:
+                    if self._closed:
+                        break
+                    os.write(self._fd, data)
+                    self.written += len(data) // 4
+        except Exception:
+            log.exception("Deck download failed")
+        finally:
+            self.done = True
+
+    def read(self, start: int, count: int) -> np.ndarray:
+        end = min(start + count, self.written)
+        if end <= start:
+            return np.zeros((0, 2), np.float32)
+        with self._lock:
+            if self._closed:
+                return np.zeros((0, 2), np.float32)
+            data = os.pread(self._fd, (end - start) * 4, start * 4)
+        return np.frombuffer(data, np.int16).reshape(-1, 2).astype(np.float32) / 32768
+
+    def read_raw(self, start: int, count: int) -> np.ndarray:
+        """int16 samples, for analysis and waveforms."""
+        end = min(start + count, self.written)
+        with self._lock:
+            if self._closed or end <= start:
+                return np.zeros((0, 2), np.int16)
+            data = os.pread(self._fd, (end - start) * 4, start * 4)
+        return np.frombuffer(data, np.int16).reshape(-1, 2)
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            os.close(self._fd)
+            try:
+                os.unlink(self._path)
+            except OSError:
+                pass
+        threading.Thread(target=self._audio.cleanup, daemon=True).start()
+
+
+class _StreamStore:
+    """A live stream (radio): a short read-ahead buffer that only goes forwards."""
+
+    def __init__(self, audio: discord.AudioSource, title: str, lookahead: int):
+        self._audio = audio
+        self._chunks: collections.deque[np.ndarray] = collections.deque()
+        self._base = 0  # sample index of the first buffered sample
+        self._buffered = 0
+        self._lookahead = lookahead * SAMPLES
         self._cv = threading.Condition()
-        self._src = np.zeros((0, 2), np.float32)  # samples being resampled
-        self._pos = 0.0  # fractional read position in _src
-        self._last_gain = 0.0
-        self._fade_in = 0
-        self._fade_out_at: int | None = None
-        self._fade_out_len = 1
-        threading.Thread(target=self._fill, name=f"deck-{track.title[:20]}", daemon=True).start()
+        self._closed = False
+        self.done = False
+        threading.Thread(target=self._fill, name=f"deck-{title[:20]}", daemon=True).start()
+
+    @property
+    def written(self) -> int:
+        return self._base + self._buffered
 
     def _fill(self) -> None:
         try:
             while True:
                 with self._cv:
-                    while len(self._buffer) >= self._lookahead and not self._closed:
+                    while self._buffered >= self._lookahead and not self._closed:
                         self._cv.wait()
                     if self._closed:
                         return
-                data = self.audio.read()
+                data = self._audio.read()
                 if not data:
                     return
-                if len(data) < FRAME:
-                    data += b"\0" * (FRAME - len(data))
-                samples = np.frombuffer(data, np.int16).reshape(-1, 2).astype(np.float32) / 32768
+                chunk = np.frombuffer(data, np.int16).reshape(-1, 2).astype(np.float32) / 32768
                 with self._cv:
-                    self._buffer.append(samples)
+                    self._chunks.append(chunk)
+                    self._buffered += len(chunk)
         except Exception:
-            log.exception("Deck reader failed for %s", self.track.title)
+            log.exception("Stream reader failed")
         finally:
             with self._cv:
-                self.eof = True
+                self.done = True
                 self._cv.notify_all()
+
+    def read(self, start: int, count: int) -> np.ndarray:
+        with self._cv:
+            while self._chunks and self._base + len(self._chunks[0]) <= start:  # already played
+                gone = self._chunks.popleft()
+                self._base += len(gone)
+                self._buffered -= len(gone)
+            self._cv.notify()
+            parts, have, pos = [], 0, self._base
+            for chunk in self._chunks:
+                if have >= count + (start - self._base):
+                    break
+                parts.append(chunk)
+                have += len(chunk)
+            if not parts:
+                return np.zeros((0, 2), np.float32)
+            joined = np.concatenate(parts) if len(parts) > 1 else parts[0]
+        return joined[max(0, start - self._base): max(0, start - self._base) + count]
+
+    def close(self) -> None:
+        with self._cv:
+            self._closed = True
+            self._cv.notify_all()
+        threading.Thread(target=self._audio.cleanup, daemon=True).start()
+
+
+class Deck:
+    """One track on a deck. Finite tracks download completely (so you can jump around); radio streams forwards."""
+
+    def __init__(self, track, audio: discord.AudioSource, lookahead: int):
+        self.track = track
+        self.seekable = track.kind != "stream"
+        if self.seekable:
+            self.store = _FileStore(audio, track.title, long=(track.duration or 0) > 20 * 60)
+        else:
+            self.store = _StreamStore(audio, track.title, lookahead)
+        self.playing = True  # live mode loads decks paused ("cued")
+        self.volume = 1.0  # channel fader
+        self.pitch = 1.0  # playback speed; changes tempo and pitch together, like a turntable
+        self.nudge = 0.0
+        self.filters = DeckFilters()
+        self.grid: tuple[float, float] | None = None  # (BPM, a beat's time in seconds), from analysis
+        self.sync_lock = False  # keep tempo and beats locked to the other deck
+        self.sync_mult = 1.0  # 2 or 0.5 when synced in double or half time
+        self.cue_point = 0.0  # seconds
+        self.wave: dict | None = None  # waveform data for the mixer page, once the download finishes
+        self.level = 0.0  # loudness after the fader, for the meters
+        self.played = 0  # frames output
+        self.position = 0.0  # in source samples
+        self.created = time.monotonic()
+        self._jump: tuple[float, float] | None = None  # (target, position when asked), applied on the next frame
+        self._declick = False
+        self._last_gain = 0.0
+        self._fade_in = 0
+        self._fade_out_at: int | None = None
+        self._fade_out_len = 1
+
+    @property
+    def eof(self) -> bool:
+        return self.store.done
+
+    @property
+    def bpm(self) -> float | None:
+        return self.grid[0] if self.grid else None
 
     @property
     def rate(self) -> float:
@@ -88,19 +201,33 @@ class Deck:
 
     @property
     def effective_bpm(self) -> float | None:
-        return round(self.bpm * self.pitch, 1) if self.bpm else None
+        return round(self.bpm * self.pitch, 2) if self.bpm else None
 
     @property
     def elapsed(self) -> float:
-        return self.consumed / RATE
+        return self.position / RATE
+
+    @property
+    def loaded(self) -> float:
+        """Seconds of the track downloaded so far."""
+        return self.store.written / RATE
+
+    @property
+    def beat_period(self) -> float | None:
+        return 60 / self.bpm if self.bpm else None
+
+    def beat_phase(self, at: float | None = None) -> float | None:
+        """Where we are within the current beat, 0-1, at track time `at` (default: now)."""
+        if not self.grid:
+            return None
+        return (((self.elapsed if at is None else at) - self.grid[1]) / self.beat_period) % 1.0
 
     @property
     def remaining(self) -> int | None:
-        """Frames left to play, once ffmpeg has finished; None while it's still going."""
-        if not self.eof:
+        """Frames left to play, once the whole track has arrived; None until then."""
+        if not self.store.done:
             return None
-        samples = len(self._buffer) * SAMPLES + len(self._src) - self._pos
-        return int(samples / self.rate / SAMPLES)
+        return int(max(0.0, self.store.written - self.position) / self.rate / SAMPLES)
 
     @property
     def fading_out(self) -> bool:
@@ -110,7 +237,7 @@ class Deck:
     def finished(self) -> bool:
         if self._fade_out_at is not None and self.played - self._fade_out_at >= self._fade_out_len:
             return True
-        return self.eof and not self._buffer and len(self._src) - self._pos < 2
+        return self.store.done and self.position >= self.store.written - 2
 
     @property
     def gain(self) -> float:
@@ -134,41 +261,42 @@ class Deck:
     def clear_fades(self) -> None:
         self._fade_in, self._fade_out_at = 0, None
 
+    def seek(self, seconds: float) -> float:
+        """Jump to `seconds` (as far as has downloaded). Returns where it actually lands."""
+        if not self.seekable:
+            return self.elapsed
+        limit = max(0, self.store.written - SAMPLES)
+        target = min(max(0.0, seconds * RATE), limit)
+        if self.playing and self.played:
+            self._jump = (target, self.position)  # applied on the next frame, with a quick fade so it doesn't click
+        else:
+            self.position = target
+        return target / RATE
+
     def render(self, crossfader_gain: float) -> np.ndarray | None:
-        """The next 20 ms, processed and faded, or None if paused or nothing is buffered yet."""
+        """The next 20 ms, processed and faded, or None if paused or nothing has arrived yet."""
         if not self.playing:
             self.level = 0.0
             return None
+        fade_this = self._jump is not None
         rate = self.rate
-        need = self._pos + SAMPLES * rate + 2
-        if len(self._src) < need:
-            parts = [self._src]
-            have = len(self._src)
-            with self._cv:
-                while have < need and self._buffer:
-                    part = self._buffer.popleft()
-                    parts.append(part)
-                    have += len(part)
-                self._cv.notify()
-            self._src = np.concatenate(parts) if len(parts) > 1 else self._src
-        available = len(self._src) - 1 - self._pos
+        start = int(self.position)
+        frac = self.position - start
+        src = self.store.read(start, int(math.ceil(frac + SAMPLES * rate)) + 2)
+        available = len(src) - 1 - frac
         if available <= 0:
             self.level = 0.0
             return None
         count = min(SAMPLES, int(available / rate))
         if count <= 0:
             return None
-        if rate == 1.0 and self._pos == int(self._pos):
-            start = int(self._pos)
-            out = self._src[start:start + count].copy()
+        if rate == 1.0 and frac == 0:
+            out = src[:count].copy()
         else:
-            idx = self._pos + np.arange(count) * rate
-            base = np.arange(len(self._src))
-            out = np.stack([np.interp(idx, base, self._src[:, 0]), np.interp(idx, base, self._src[:, 1])], axis=1).astype(np.float32)
-        self._pos += count * rate
-        used = int(self._pos)
-        self._src, self._pos = self._src[used:], self._pos - used
-        self.consumed += used
+            idx = frac + np.arange(count) * rate
+            base = np.arange(len(src))
+            out = np.stack([np.interp(idx, base, src[:, 0]), np.interp(idx, base, src[:, 1])], axis=1).astype(np.float32)
+        self.position += count * rate
         if count < SAMPLES:
             out = np.vstack([out, np.zeros((SAMPLES - count, 2), np.float32)])
 
@@ -179,16 +307,20 @@ class Deck:
         elif target != 1.0:
             out *= target
         self._last_gain = target
+        if fade_this:  # jumping: fade this frame out, then fade the new spot in
+            out *= np.linspace(1, 0, SAMPLES, dtype=np.float32)[:, None]
+            target, asked_at = self._jump
+            # Keep the time that played since the jump was asked for, so beat-preserving jumps stay on the beat.
+            self.position, self._jump, self._declick = target + (self.position - asked_at), None, True
+        elif self._declick:
+            out[:240] *= np.linspace(0, 1, 240, dtype=np.float32)[:, None]
+            self._declick = False
         self.level = float(np.sqrt(np.mean(out * out)))
         self.played += 1
         return out
 
     def close(self) -> None:
-        with self._cv:
-            self._closed = True
-            self._cv.notify_all()
-        # Killing yt-dlp/ffmpeg can take a moment; never do it on the audio thread.
-        threading.Thread(target=self.audio.cleanup, daemon=True).start()
+        self.store.close()
 
 
 class Mixer(discord.AudioSource):

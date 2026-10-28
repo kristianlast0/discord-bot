@@ -1,5 +1,6 @@
 """One player per server: the queue, the two-deck mixer, the DJ booth message and auto-leave."""
 import asyncio
+import base64
 import collections
 import io
 import json
@@ -41,8 +42,12 @@ _BOOTH_MIXING_EVERY = 3  # ...and while two decks are mixing
 _CROSSFADE_STEPS = (0, 3, 6, 10)
 _AUTODJ_LENGTH = (60, 600)  # Auto-DJ skips clips and hour-long mixes
 _LIVE_BOOTH_EVERY = 4  # seconds between booth redraws while someone mixes live
-_BPM_FILE = "bpm.json"
-_ANALYSE_FROM, _ANALYSE_SECONDS = 15, 60  # which part of a song tempo detection listens to
+_GRID_FILE = "beatgrids.json"  # cached (BPM, beat time) per song
+_ANALYSE_FROM, _ANALYSE_SECONDS = 10, 120  # which part of a song the beat grid is worked out from
+_WAVE_COLUMNS = 800  # width of the whole-track waveform
+_DETAIL_RATE = 100  # waveform peaks per second, for the zoomed view
+_AUTO_MATCH_RANGE = 0.08  # automatic mixes only beat-match songs within ±8% of each other's tempo
+_PITCH_GLIDE = 0.0005  # per tick (0.2%/s): after an automatic beat-matched mix, ease back to normal speed
 
 
 def _audio_options(track: Track) -> str:
@@ -88,26 +93,32 @@ class YtdlpAudio(discord.FFmpegPCMAudio):
         super().cleanup()
 
 
-def _decode_for_analysis(playable: tracks.Playable) -> np.ndarray:
-    """A minute of mono, low-rate audio for tempo detection (blocking; run in an executor)."""
-    ffmpeg = ["ffmpeg", "-nostdin", "-loglevel", "error", "-ss", str(_ANALYSE_FROM), "-t", str(_ANALYSE_SECONDS)]
-    out = ["-vn", "-ac", "1", "-ar", str(dsp.ANALYSIS_RATE), "-f", "f32le", "pipe:1"]
-    if playable.info:
-        fd, path = tempfile.mkstemp(prefix="music-bot-bpm-", suffix=".json")
-        with os.fdopen(fd, "w") as f:
-            json.dump(playable.info, f)
-        try:
-            ytdlp = subprocess.Popen([sys.executable, "-m", "yt_dlp", "--quiet", "--no-warnings", "--no-progress",
-                                      "-f", "bestaudio/best", "--load-info-json", path, "-o", "-"],
-                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            result = subprocess.run(ffmpeg + ["-i", "pipe:0"] + out, stdin=ytdlp.stdout, capture_output=True, timeout=120)
-            ytdlp.kill()
-            ytdlp.wait()
-        finally:
-            os.unlink(path)
-    else:
-        result = subprocess.run(ffmpeg + ["-i", playable.url] + out, capture_output=True, timeout=120)
-    return np.frombuffer(result.stdout, np.float32)
+def _beat_grid_for(deck: Deck) -> tuple[float, float] | None:
+    """Beat grid from the deck's own audio (blocking; run in an executor), so it lines up exactly with playback."""
+    rate = 48000
+    start = _ANALYSE_FROM * rate if deck.loaded > _ANALYSE_FROM + 30 else 0
+    pcm = deck.store.read_raw(start, _ANALYSE_SECONDS * rate)
+    mono = pcm.astype(np.float32).mean(axis=1) / 32768
+    mono = mono[: len(mono) // 4 * 4].reshape(-1, 4).mean(axis=1)  # 48 kHz -> 12 kHz
+    return dsp.beat_grid(mono, dsp.ANALYSIS_RATE, start=start / rate)
+
+
+def _waveform_for(deck: Deck) -> dict:
+    """Peaks for the whole-track waveform and the zoomed view (blocking; run in an executor)."""
+    rate, chunk = 48000, 48000 * 10
+    detail: list[int] = []
+    for start in range(0, deck.store.written, chunk):
+        pcm = deck.store.read_raw(start, chunk)
+        detail += dsp.overview(pcm, max(1, round(len(pcm) / rate * _DETAIL_RATE)))
+    peaks = np.array(detail or [0], dtype=np.uint8)
+    edges = np.linspace(0, len(peaks), _WAVE_COLUMNS + 1).astype(int)
+    overview = np.maximum.reduceat(peaks, np.minimum(edges[:-1], len(peaks) - 1))
+    return {
+        "overview": overview.tolist(),
+        "detail": base64.b64encode(peaks.tobytes()).decode(),
+        "detail_rate": _DETAIL_RATE,
+        "length": deck.store.written / rate,
+    }
 
 
 def _audio_for(playable: tracks.Playable, track: Track) -> discord.AudioSource:
@@ -266,6 +277,8 @@ class GuildPlayer:
         self.live_dj: tuple[int, str] | None = None  # (member ID, name) of whoever is mixing live
         self.consoles = 0  # open mixer pages; tempo detection only runs when someone might use it
         self.queue_version = 0  # bumped whenever the queue changes, so mixer pages know to redraw it
+        self.quantize = True  # live jumps and cue points snap to beats
+        self._analysing: set[int] = set()  # id() of decks being analysed
 
     # ── State ───────────────────────────────────────────────────────
 
@@ -570,8 +583,8 @@ class GuildPlayer:
                 return
             await self._load_next(frames(_START_FADE))
 
-    async def _load_next(self, fade_in: int) -> bool:
-        """Put the next track on the free deck and fade it in. Call with the lock held."""
+    async def _load_next(self, fade_in: int, match: Deck | None = None) -> bool:
+        """Put the next track on the free deck and fade it in, beat-matched to `match` if given. Call with the lock held."""
         if self._priming:
             try:
                 await self._priming
@@ -589,6 +602,8 @@ class GuildPlayer:
                 deck.close()
                 return False
             deck.fade_in(fade_in)
+            if match:
+                self._beatmatch(deck, match)
             deck.playing = True
             slot = mixer.slot_of(deck)
             if slot is None:
@@ -597,8 +612,7 @@ class GuildPlayer:
             self.current, self._deck, self._slot = track, deck, slot
             self.skip_votes.clear()
             self.queue_version += 1
-            if self.consoles:
-                asyncio.create_task(self._analyse(deck))
+            asyncio.create_task(self._analyse(deck))
             self._remember(track)
             await self.refresh_player(repost=True)
             self.prefetch()
@@ -682,8 +696,7 @@ class GuildPlayer:
             deck.playing = False  # cued on the other deck until the mix
             self._mixer.load(1 - self._slot, deck)
             self._primed = deck
-            if self.consoles:
-                asyncio.create_task(self._analyse(deck))
+            asyncio.create_task(self._analyse(deck))
             await self.refresh_player()  # show it cued up on the other deck
         finally:
             self._priming = None
@@ -692,7 +705,7 @@ class GuildPlayer:
         if deck.track.kind == "stream":
             return False  # radio doesn't end; the next track loads when someone skips
         if deck.remaining is not None:
-            return True
+            return deck.remaining <= frames(self._crossfade_seconds() + _PRIME_AHEAD)
         return bool(deck.track.duration) and deck.elapsed >= deck.track.duration - self._crossfade_seconds() - _PRIME_AHEAD
 
     async def _conduct(self) -> None:
@@ -722,6 +735,10 @@ class GuildPlayer:
                     await self.notice(f"⚠️ **{deck.track.title}** never started, so I've moved on.")
                     await self._advance(deck, skipped=True)
                     continue
+                others = [d for d in self._mixer.decks if d is not deck and d.playing and not d.finished]
+                if deck.pitch != 1.0 and not others:  # after a beat-matched mix, drift back to normal speed
+                    step = min(_PITCH_GLIDE, abs(1.0 - deck.pitch))
+                    deck.pitch += step if deck.pitch < 1.0 else -step
                 every = _BOOTH_MIXING_EVERY if now < self._mix_until else _BOOTH_EVERY
                 if now - self._last_booth >= every and not self._message_lock.locked():
                     asyncio.create_task(self.refresh_player())
@@ -763,7 +780,8 @@ class GuildPlayer:
                 self.queue.insert(0, finished)
             elif self.loop_mode == "queue":
                 self.queue.append(finished)
-            await self._load_next(fade_in)
+            crossfading = not ended and (mix or not skipped) and crossfade
+            await self._load_next(fade_in, match=deck if crossfading else None)
 
     def _session_ended(self, error: Exception | None) -> None:
         # Runs on the audio thread when the mixer stream stops.
@@ -864,6 +882,14 @@ class GuildPlayer:
             self.current = self._deck.track
             self._remember(self.current)
             self._last_booth = 0  # redraw now
+        slots = self._mixer.slots
+        for slot, deck in enumerate(slots):
+            master = slots[1 - slot]
+            if deck and deck.sync_lock:
+                if master and master.grid and deck.grid:
+                    self._hold_sync(deck, master)
+                else:
+                    deck.nudge = 0.0
         if now - self._last_booth >= _LIVE_BOOTH_EVERY and not self._message_lock.locked() and self.current:
             asyncio.create_task(self.refresh_player())
 
@@ -888,7 +914,7 @@ class GuildPlayer:
             mixer.manual = True
             self.live_dj = (member.id, member.display_name)
             for deck in mixer.decks:
-                if deck.bpm is None:
+                if deck.grid is None:
                     asyncio.create_task(self._analyse(deck))
         await self.notice(f"🎧 {member.display_name} has taken the decks and is mixing live.", lifetime=60)
         await self.refresh_player()
@@ -913,6 +939,8 @@ class GuildPlayer:
                     mixer.load(slot, None)
             mixer.manual = False
             mixer.crossfader = float(on_air[0]) if on_air else 0.0
+            for deck in mixer.decks:
+                deck.sync_lock, deck.nudge = False, 0.0
             if on_air:
                 self._slot, self._deck = on_air
                 self.current = self._deck.track
@@ -947,18 +975,49 @@ class GuildPlayer:
             self._deck, self.current = deck, track
         asyncio.create_task(self._analyse(deck))
 
-    async def deck_cue(self, slot: int) -> None:
-        """Back to the start of the track, paused (reloads it, as the stream can't rewind)."""
+    def deck_cue(self, slot: int) -> None:
+        """Like a CDJ: while playing, jump back to the cue point and stop; while stopped, set the cue point here."""
         deck = self._live_deck(slot)
-        bpm = deck.bpm
-        await self.deck_load(slot, deck.track)
-        self._mixer.slots[slot].bpm = bpm
+        if not deck.seekable:
+            raise UserError("Radio can't be cued.")
+        if deck.playing:
+            deck.playing = False
+            deck.seek(deck.cue_point)
+        else:
+            deck.cue_point = deck.seek(self._snap(deck, deck.elapsed))
 
     def deck_play(self, slot: int, playing: bool) -> None:
         deck = self._live_deck(slot)
         if deck.finished:
-            raise UserError("That track has finished. Cue it or load another.")
+            raise UserError("That track has finished. Jump back or load another.")
         deck.playing = playing
+
+    def _snap(self, deck: Deck, seconds: float) -> float:
+        """With quantise on, land exactly on a beat."""
+        if not self.quantize or not deck.grid:
+            return seconds
+        period, first = deck.beat_period, deck.grid[1]
+        return first + round((seconds - first) / period) * period
+
+    def deck_seek(self, slot: int, seconds: float) -> float:
+        deck = self._live_deck(slot)
+        if not deck.seekable:
+            raise UserError("Radio is live, so it can't jump around.")
+        if self.quantize and deck.grid and deck.playing:
+            # Keep the beat going: move by a whole number of beats, so the deck stays in time.
+            period = deck.beat_period
+            seconds = deck.elapsed + round((seconds - deck.elapsed) / period) * period
+        elif not deck.playing:
+            seconds = self._snap(deck, seconds)
+        return deck.seek(seconds)
+
+    def deck_beatjump(self, slot: int, beats: float) -> float:
+        deck = self._live_deck(slot)
+        if not deck.seekable:
+            raise UserError("Radio is live, so it can't jump around.")
+        if not deck.grid:
+            raise UserError("Beat jump needs the beat grid, which appears a few seconds after loading.")
+        return deck.seek(deck.elapsed + beats * deck.beat_period)
 
     def deck_set(self, slot: int, param: str, value: float) -> None:
         deck = self._live_deck(slot)
@@ -969,24 +1028,82 @@ class GuildPlayer:
         elif param == "filter":
             deck.filters.filter = min(1.0, max(-1.0, value))
         elif param == "pitch":
+            if deck.sync_lock:
+                raise UserError("This deck is locked to the other one. Turn off Lock to move its pitch.")
             deck.pitch = min(1 + PITCH_RANGE, max(1 - PITCH_RANGE, value))
         elif param == "nudge":
-            deck.nudge = min(NUDGE, max(-NUDGE, value))
+            if not deck.sync_lock:
+                deck.nudge = min(NUDGE, max(-NUDGE, value))
         else:
             raise UserError(f"Unknown control {param}.")
 
+    @staticmethod
+    def _match(deck: Deck, master: Deck, limit: float) -> tuple[float, float] | None:
+        """(pitch, multiple) that brings `deck` to `master`'s tempo, counting half and double time; None if too far."""
+        target = master.effective_bpm
+        options = [(target * m / deck.bpm, m) for m in (1.0, 2.0, 0.5)]
+        pitch, mult = min(options, key=lambda o: abs(o[0] - 1))
+        return (pitch, mult) if abs(pitch - 1) <= limit else None
+
+    @staticmethod
+    def _beat_error(deck: Deck, master: Deck) -> float:
+        """How far `deck`'s beats are from `master`'s, in seconds of deck time (positive: deck is behind)."""
+        master_phase = master.beat_phase()
+        if deck.sync_mult == 2.0:
+            target = (master_phase * 2) % 1
+        elif deck.sync_mult == 0.5:  # one deck beat per two master beats: either of two spots works
+            here = deck.beat_phase()
+            target = min((master_phase / 2, (master_phase + 1) / 2), key=lambda t: abs(((t - here + 0.5) % 1) - 0.5))
+        else:
+            target = master_phase
+        return (((target - deck.beat_phase() + 0.5) % 1) - 0.5) * deck.beat_period
+
     def deck_sync(self, slot: int) -> float:
-        """Match this deck's tempo to the other deck's. Returns the new pitch."""
-        deck, other = self._live_deck(slot), self._mixer.slots[1 - slot]
-        if not deck.bpm or not other or not other.effective_bpm:
-            raise UserError("Both decks need a BPM first (it takes a few seconds after loading).")
-        target = other.effective_bpm
-        options = [target / deck.bpm, target * 2 / deck.bpm, target / 2 / deck.bpm]  # half/double time counts too
-        pitch = min(options, key=lambda p: abs(p - 1))
-        if abs(pitch - 1) > PITCH_RANGE:
-            raise UserError(f"{deck.bpm:g} and {target:g} BPM are too far apart to sync (more than ±{PITCH_RANGE:.0%}).")
-        deck.pitch = pitch
-        return pitch
+        """Match this deck's tempo to the other deck's and line its beats up. Returns the new pitch."""
+        deck, master = self._live_deck(slot), self._mixer.slots[1 - slot]
+        if not deck.grid or not master or not master.grid:
+            raise UserError("Both decks need their beat grid first (it appears a few seconds after loading).")
+        found = self._match(deck, master, PITCH_RANGE)
+        if not found:
+            raise UserError(f"{deck.bpm:g} and {master.effective_bpm:g} BPM are too far apart to sync (more than ±{PITCH_RANGE:.0%}).")
+        deck.pitch, deck.sync_mult = found
+        if deck.seekable:
+            deck.seek(deck.elapsed + self._beat_error(deck, master))
+        return deck.pitch
+
+    def deck_lock(self, slot: int, on: bool) -> None:
+        """Keep this deck's tempo and beats locked to the other deck (until turned off)."""
+        deck, master = self._live_deck(slot), self._mixer.slots[1 - slot]
+        if on:
+            self.deck_sync(slot)
+            if master:
+                master.sync_lock = False
+        deck.sync_lock = on
+        deck.nudge = 0.0
+
+    def _hold_sync(self, deck: Deck, master: Deck) -> None:
+        """Called a few times a second for a locked deck: follow the master's pitch and gently correct any drift."""
+        deck.pitch = min(1 + PITCH_RANGE, max(1 - PITCH_RANGE, master.effective_bpm * deck.sync_mult / deck.bpm))
+        if not (deck.playing and master.playing):
+            deck.nudge = 0.0
+            return
+        error = self._beat_error(deck, master)
+        deck.nudge = max(-0.03, min(0.03, error * 2)) if abs(error) > 0.004 else 0.0
+
+    def _beatmatch(self, incoming: Deck, outgoing: Deck) -> None:
+        """For automatic mixes: match the incoming song's tempo to the outgoing one and start it on the beat."""
+        if not settings.dj(self.guild_id)["beatmatch"] or not incoming.seekable:
+            return
+        if not incoming.grid or not outgoing.grid or not outgoing.playing:
+            return
+        found = self._match(incoming, outgoing, _AUTO_MATCH_RANGE)
+        if not found:
+            return
+        incoming.pitch, incoming.sync_mult = found
+        start = incoming.elapsed + self._beat_error(incoming, outgoing)
+        if start < 0:
+            start += incoming.beat_period
+        incoming.seek(start)
 
     def mixer_set(self, param: str, value) -> None:
         if not self.live_dj or not self._mixer:
@@ -999,6 +1116,8 @@ class GuildPlayer:
             mixer.curve = "cut" if value == "cut" else "smooth"
         elif param == "master":
             mixer.master = min(1.5, max(0.0, float(value)))
+        elif param == "quantize":
+            self.quantize = bool(value)
         elif param == "autofade":  # glide the crossfader to deck `value[0]` over value[1] seconds
             target, seconds = value
             mixer.move_crossfader(float(target), min(60.0, max(0.5, float(seconds))))
@@ -1011,28 +1130,43 @@ class GuildPlayer:
         return self.queue.pop(index)
 
     async def _analyse(self, deck: Deck) -> None:
-        """Find a deck's tempo in the background (cached per song)."""
-        track = deck.track
-        if track.kind == "stream" or deck.bpm:
+        """Work out a deck's beat grid and waveform in the background, from its own downloaded audio."""
+        if not deck.seekable or id(deck) in self._analysing:
             return
-        key = tracks.video_id(track.page_url) or tracks.video_id(track.source) or f"{track.kind}:{track.source}"
-        cache = store.load(_BPM_FILE, {})
-        if key in cache:
-            deck.bpm = cache[key]
-            return
+        self._analysing.add(id(deck))
         try:
-            playable = await tracks.stream_for(track)
+            track = deck.track
+            key = tracks.video_id(track.page_url) or tracks.video_id(track.source) or f"{track.kind}:{track.source}"
             loop = asyncio.get_running_loop()
-            samples = await loop.run_in_executor(None, _decode_for_analysis, playable)
-            bpm = await loop.run_in_executor(None, dsp.detect_bpm, samples)
+            need = _ANALYSE_FROM + _ANALYSE_SECONDS
+            while not deck.store.done and deck.loaded < need:
+                if deck not in (self._mixer.slots if self._mixer else ()):
+                    return  # ejected meanwhile
+                await asyncio.sleep(0.5)
+            if deck.grid is None:
+                cached = store.load(_GRID_FILE, {}).get(key)
+                if cached:
+                    deck.grid = tuple(cached)
+                else:
+                    grid = await loop.run_in_executor(None, _beat_grid_for, deck)
+                    if grid:
+                        deck.grid = grid
+                        cache = store.load(_GRID_FILE, {})
+                        cache[key] = list(grid)
+                        store.save(_GRID_FILE, cache)
+            while not deck.store.done:
+                if deck not in (self._mixer.slots if self._mixer else ()):
+                    return
+                await asyncio.sleep(1)
+            deck.wave = await loop.run_in_executor(None, _waveform_for, deck)
         except Exception:
-            log.exception("Tempo detection failed for %s", track.title)
-            return
-        if bpm:
-            deck.bpm = bpm
-            cache = store.load(_BPM_FILE, {})
-            cache[key] = bpm
-            store.save(_BPM_FILE, cache)
+            log.exception("Analysis failed for %s", deck.track.title)
+        finally:
+            self._analysing.discard(id(deck))
+
+    def wave_for(self, slot: int) -> dict | None:
+        deck = self._mixer.slots[slot] if self._mixer else None
+        return {**deck.wave, "key": id(deck)} if deck and deck.wave else None
 
     def snapshot(self) -> dict:
         """Everything the mixer page shows, sent several times a second."""
@@ -1048,7 +1182,11 @@ class GuildPlayer:
                 "title": deck.track.title, "duration": deck.track.duration, "elapsed": round(deck.elapsed, 2),
                 "playing": deck.playing and not deck.finished, "ended": deck.finished, "on_air": deck is self._deck,
                 "volume": deck.volume, "low": f.low, "mid": f.mid, "high": f.high, "filter": f.filter,
-                "pitch": deck.pitch, "nudge": deck.nudge, "bpm": deck.bpm, "effective_bpm": deck.effective_bpm,
+                "pitch": deck.pitch, "nudge": deck.nudge, "rate": deck.rate if deck.playing else 0.0,
+                "bpm": deck.bpm, "effective_bpm": deck.effective_bpm, "first_beat": deck.grid[1] if deck.grid else None,
+                "seekable": deck.seekable, "loaded": round(deck.loaded, 1), "complete": deck.eof,
+                "cue": deck.cue_point, "sync_lock": deck.sync_lock,
+                "wave_key": id(deck) if deck.wave else None,
                 "level": round(deck.level, 4), "page_url": deck.track.page_url,
             })
         vc = self.voice
@@ -1061,6 +1199,7 @@ class GuildPlayer:
                 "curve": mixer.curve if mixer else "smooth",
                 "master": mixer.master if mixer else 1.0,
                 "manual": bool(mixer and mixer.manual),
+                "quantize": self.quantize,
             },
             "decks": decks,
             "queue_key": hash(tuple(id(t) for t in self.queue[:50])),

@@ -186,6 +186,7 @@ class MixerServer:
 
     async def _send_state(self, ws: web.WebSocketResponse, guild: discord.Guild, player, user_id: int) -> None:
         queue_key = None
+        wave_keys: list = [None, None]
         away_since = None
         try:
             while not ws.closed:
@@ -199,6 +200,12 @@ class MixerServer:
                     queue_key = state["queue_key"]
                     state["queue"] = player.queue_snapshot()
                 await ws.send_json(state)
+                for slot in (0, 1):  # waveforms are big, so each is sent once per track
+                    key = (state["decks"][slot] or {}).get("wave_key")
+                    if key != wave_keys[slot]:
+                        wave = player.wave_for(slot) if key else None
+                        await ws.send_json({"type": "wave", "slot": slot, "wave": wave})
+                        wave_keys[slot] = key
                 if is_dj and not in_voice:  # the DJ left the voice channel
                     away_since = away_since or time.monotonic()
                     if time.monotonic() - away_since > _SEAT_GRACE:
@@ -275,7 +282,13 @@ class MixerServer:
         elif cmd in ("play", "pause"):
             player.deck_play(slot, cmd == "play")
         elif cmd == "cue":
-            await player.deck_cue(slot)
+            player.deck_cue(slot)
+        elif cmd == "seek":
+            player.deck_seek(slot, float(data.get("value", 0)))
+        elif cmd == "beatjump":
+            player.deck_beatjump(slot, float(data.get("value", 0)))
+        elif cmd == "lock":
+            player.deck_lock(slot, bool(data.get("value")))
         elif cmd == "set":
             player.deck_set(slot, str(data.get("param")), float(data.get("value", 0)))
         elif cmd == "sync":

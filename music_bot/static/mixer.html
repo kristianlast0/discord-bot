@@ -45,8 +45,15 @@
   .pitch { display: flex; flex-direction: column; align-items: center; gap: 6px; }
   .pitch input { writing-mode: vertical-lr; direction: rtl; height: 150px; width: 28px; accent-color: var(--deck-colour); }
   .pitch .val { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--dim); }
-  .progress { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; }
-  .progress div { height: 100%; width: 0; background: var(--deck-colour); }
+  canvas { display: block; width: 100%; border-radius: 6px; background: #0d0f14; }
+  .zoom { height: 76px; margin-top: 10px; }
+  .over { height: 46px; margin-top: 12px; cursor: pointer; touch-action: none; }
+  .locked .over { cursor: default; }
+  .beatjump { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+  .beatjump button { padding: 4px 9px; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .phase { margin-top: 14px; }
+  .phase canvas { height: 22px; }
+  .phase .hint { display: flex; justify-content: space-between; }
   .times { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 4px; }
   .transport { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .transport .play { min-width: 80px; }
@@ -109,6 +116,10 @@
       <div class="xlabels"><span>A</span><span>CROSSFADER</span><span>B</span></div>
       <input type="range" id="xfader" min="0" max="1" step="0.005" value="0">
     </div>
+    <div class="phase">
+      <div class="hint"><span>BEATS</span><span id="phaseText">—</span></div>
+      <canvas id="phase" title="How far apart the two decks' beats are: centred means in time"></canvas>
+    </div>
     <div class="row control">
       <button id="fadeA">◀ Fade to A</button>
       <select id="fadeSecs"><option value="4">4 s</option><option value="8" selected>8 s</option><option value="16">16 s</option><option value="30">30 s</option></select>
@@ -118,6 +129,7 @@
       <span class="hint">Curve</span>
       <button id="curveSmooth" class="on">Smooth</button>
       <button id="curveCut">Cut</button>
+      <button id="quantize" title="Jumps and cue points snap to the beat">Quantise</button>
       <span class="spacer"></span>
       <div class="knob-wrap"><div class="knob" id="master" data-min="0" data-max="1.5" data-default="1"></div>MASTER</div>
     </div>
@@ -142,6 +154,7 @@
   <div class="deck-head"><span class="deck-name"></span><span class="onair">ON AIR</span></div>
   <div class="title">Empty</div>
   <div class="bpm"></div>
+  <canvas class="zoom" title="Zoomed waveform: the white line is now; beat lines move together when the decks are matched"></canvas>
   <div class="deck-body">
     <div class="platter"></div>
     <div class="pitch control">
@@ -150,14 +163,20 @@
       <span class="val">0.0%</span>
     </div>
   </div>
-  <div class="progress"><div></div></div>
+  <canvas class="over" title="Click or drag to jump"></canvas>
   <div class="times"><span class="el">0:00</span><span class="rem"></span></div>
   <div class="transport control">
     <button class="play">▶ Play</button>
-    <button class="cue" title="Back to the start, paused">CUE</button>
-    <button class="sync" title="Match this deck's tempo to the other deck">SYNC</button>
+    <button class="cue" title="Playing: jump back to the cue point and stop. Stopped: set the cue point here">CUE</button>
+    <button class="sync" title="Match tempo and line the beats up with the other deck">SYNC</button>
+    <button class="lock" title="Keep tempo and beats locked to the other deck">LOCK</button>
     <button class="nudge" data-dir="-1" title="Hold to slow down briefly">◀◀ Nudge</button>
     <button class="nudge" data-dir="1" title="Hold to speed up briefly">Nudge ▶▶</button>
+  </div>
+  <div class="beatjump control">
+    <span class="hint">Beat jump</span>
+    <button data-beats="-16">−16</button><button data-beats="-4">−4</button><button data-beats="-1">−1</button>
+    <button data-beats="1">+1</button><button data-beats="4">+4</button><button data-beats="16">+16</button>
   </div>
 </template>
 
@@ -175,6 +194,9 @@ const token = location.hash.slice(1);
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 let ws, state = null, you = null, queue = [];
+let stateAt = 0;  // when the latest state arrived, so positions can be moved on smoothly between updates
+const waves = [null, null];  // {overview, detail (Uint8Array), detail_rate, length} per deck
+const seekPreview = [null, null];  // where a drag on the waveform would jump to
 const touched = new Map();  // control key -> time the user last moved it, so incoming state doesn't fight their hand
 const HOLD_MS = 700;
 
@@ -208,6 +230,25 @@ for (const deck of $$(".deck")) {
   $(".play", deck).onclick = () => send({cmd: state.decks[slot]?.playing ? "pause" : "play", slot});
   $(".cue", deck).onclick = () => send({cmd: "cue", slot});
   $(".sync", deck).onclick = () => send({cmd: "sync", slot});
+  $(".lock", deck).onclick = () => send({cmd: "lock", slot, value: !state.decks[slot]?.sync_lock});
+  for (const b of $$(".beatjump button", deck)) b.onclick = () => send({cmd: "beatjump", slot, value: +b.dataset.beats});
+  const over = $(".over", deck);
+  const seekAt = e => {
+    const d = state?.decks[slot];
+    const length = waves[slot]?.length || d?.duration;
+    if (!d || !d.seekable || !length || !state.you_dj) return;
+    const r = over.getBoundingClientRect();
+    const t = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * length;
+    seekPreview[slot] = t;
+    return t;
+  };
+  over.onpointerdown = e => { if (seekAt(e) != null) over.setPointerCapture(e.pointerId); };
+  over.onpointermove = e => { if (over.hasPointerCapture(e.pointerId)) seekAt(e); };
+  over.onpointerup = e => {
+    if (!over.hasPointerCapture(e.pointerId)) return;
+    const t = seekAt(e); seekPreview[slot] = null;
+    if (t != null) send({cmd: "seek", slot, value: t});
+  };
   const pitch = $(".pitchFader", deck);
   pitch.oninput = () => sendThrottled(`pitch${slot}`, {cmd: "set", slot, param: "pitch", value: 1 + pitch.value / 100});
   pitch.ondblclick = () => { pitch.value = 0; pitch.oninput(); };
@@ -253,6 +294,7 @@ $("#fadeA").onclick = () => send({cmd: "mixer", param: "autofade", value: [0, +$
 $("#fadeB").onclick = () => send({cmd: "mixer", param: "autofade", value: [1, +$("#fadeSecs").value]});
 $("#curveSmooth").onclick = () => send({cmd: "mixer", param: "curve", value: "smooth"});
 $("#curveCut").onclick = () => send({cmd: "mixer", param: "curve", value: "cut"});
+$("#quantize").onclick = () => send({cmd: "mixer", param: "quantize", value: !state.mixer.quantize});
 $("#takeBtn").onclick = () => send({cmd: "take"});
 $("#releaseBtn").onclick = () => send({cmd: "release"});
 $("#joinBtn").onclick = () => send({cmd: "join"});
@@ -299,7 +341,7 @@ function render() {
     if (!d) {
       title.textContent = "Empty — load a track from the queue";
       $(".bpm", el).textContent = ""; $(".platter", el).classList.remove("spinning");
-      $(".progress div", el).style.width = "0"; $(".el", el).textContent = ""; $(".rem", el).textContent = "";
+      $(".el", el).textContent = ""; $(".rem", el).textContent = "";
       $(`#meter${"AB"[slot]} div`).style.height = "0";
       return;
     }
@@ -318,9 +360,12 @@ function render() {
     platter.style.animationDuration = `${1.8 / (d.pitch * (1 + d.nudge))}s`;
     if (!recentlyTouched(`pitch${slot}`)) $(".pitchFader", el).value = pitchPct.toFixed(2);
     $(".pitch .val", el).textContent = `${pitchPct >= 0 ? "+" : ""}${pitchPct.toFixed(1)}%`;
-    $(".progress div", el).style.width = d.duration ? `${Math.min(100, d.elapsed / d.duration * 100)}%` : "100%";
-    $(".el", el).textContent = d.ended ? "Ended" : fmt(d.elapsed);
-    $(".rem", el).textContent = d.duration ? `-${fmt((d.duration - d.elapsed) / d.pitch)}` : "LIVE";
+    const length = waves[slot]?.length || d.duration;
+    $(".el", el).textContent = d.ended ? "Ended" : fmt(d.elapsed) + (d.seekable && !d.complete ? ` · loading ${fmt(d.loaded)}` : "");
+    $(".rem", el).textContent = length && d.seekable ? `-${fmt((length - d.elapsed) / d.pitch)}` : "LIVE";
+    $(".lock", el).classList.toggle("on", d.sync_lock);
+    for (const b of $$(".nudge", el)) b.disabled = d.sync_lock;
+    for (const b of $$(".beatjump button, .cue, .over", el)) b.style.opacity = d.seekable ? "" : ".35";
     $(".play", el).textContent = d.playing ? "❚❚ Pause" : "▶ Play";
     $(".play", el).classList.toggle("on", d.playing);
     for (const k of $$(".knob", strip)) if (!recentlyTouched(k.dataset.key)) k.setValue(d[k.dataset.param]);
@@ -332,7 +377,97 @@ function render() {
   if (!recentlyTouched("master")) $("#master").setValue(s.mixer.master);
   $("#curveSmooth").classList.toggle("on", s.mixer.curve === "smooth");
   $("#curveCut").classList.toggle("on", s.mixer.curve === "cut");
+  $("#quantize").classList.toggle("on", s.mixer.quantize);
 }
+
+// ── Waveforms and the phase meter, drawn every animation frame ──
+function position(d) {  // where a deck is now, moving it on from the last update
+  return d.elapsed + (d.playing && !state.paused ? d.rate * (performance.now() - stateAt) / 1000 : 0);
+}
+function fit(canvas) {
+  const w = canvas.clientWidth * devicePixelRatio, h = canvas.clientHeight * devicePixelRatio;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  return canvas.getContext("2d");
+}
+const COLOURS = ["#5865f2", "#eb459e"];
+const ZOOM_SECONDS = 4;  // the zoomed view shows this much real time either side of now
+
+function drawDeck(slot) {
+  const el = $$(".deck")[slot], d = state.decks[slot], wave = waves[slot];
+  const zoom = $(".zoom", el), over = $(".over", el);
+  const zc = fit(zoom), oc = fit(over);
+  zc.clearRect(0, 0, zoom.width, zoom.height); oc.clearRect(0, 0, over.width, over.height);
+  if (!d) return;
+  const pos = position(d), colour = COLOURS[slot];
+  const W = zoom.width, H = zoom.height, mid = H / 2;
+
+  // Zoomed view: real time across, so both decks' beats line up when they're matched.
+  const pxPerSec = W / (2 * ZOOM_SECONDS), speed = d.pitch * (1 + d.nudge);
+  if (wave) {
+    zc.fillStyle = colour;
+    for (let x = 0; x < W; x++) {
+      const t = pos + (x - W / 2) / pxPerSec * speed;
+      const i = Math.floor(t * wave.detail_rate);
+      if (i < 0 || i >= wave.detail.length) continue;
+      const h = wave.detail[i] / 255 * (H / 2 - 2);
+      zc.fillRect(x, mid - h, 1, 2 * h);
+    }
+  } else if (d.seekable) {
+    zc.fillStyle = "#8b91a3"; zc.font = `${12 * devicePixelRatio}px system-ui`; zc.fillText("Loading waveform…", 10, mid);
+  }
+  if (d.bpm != null && d.first_beat != null) {
+    const period = 60 / d.bpm;
+    const first = Math.ceil((pos - ZOOM_SECONDS * speed - d.first_beat) / period);
+    for (let k = first; ; k++) {
+      const t = d.first_beat + k * period, x = W / 2 + (t - pos) / speed * pxPerSec;
+      if (x > W) break;
+      zc.fillStyle = k % 4 === 0 ? "rgba(255,255,255,.75)" : "rgba(255,255,255,.28)";
+      zc.fillRect(x, 0, k % 4 === 0 ? 2 : 1, H);
+    }
+  }
+  zc.fillStyle = "#fff"; zc.fillRect(W / 2 - 1, 0, 2, H);
+
+  // Whole track: click to jump. Shaded part has downloaded; the marker is the cue point.
+  const OW = over.width, OH = over.height, length = wave?.length || d.duration;
+  if (!length) { oc.fillStyle = colour; oc.fillRect(0, 0, OW, OH); return; }
+  if (wave) {
+    const n = wave.overview.length;
+    for (let x = 0; x < OW; x++) {
+      const h = wave.overview[Math.floor(x / OW * n)] / 255 * (OH / 2 - 1);
+      oc.fillStyle = x / OW * length < pos ? colour : "#4a5063";
+      oc.fillRect(x, OH / 2 - h, 1, 2 * h);
+    }
+  } else {
+    oc.fillStyle = "#2f3442"; oc.fillRect(0, OH / 2 - 2, OW * Math.min(1, d.loaded / length), 4);
+    oc.fillStyle = colour; oc.fillRect(0, OH / 2 - 2, OW * Math.min(1, pos / length), 4);
+  }
+  oc.fillStyle = "#f0be3c"; oc.fillRect(d.cue / length * OW - 1, 0, 3, OH);
+  oc.fillStyle = "#fff"; oc.fillRect(pos / length * OW - 1, 0, 2, OH);
+  if (seekPreview[slot] != null) { oc.fillStyle = "rgba(255,255,255,.5)"; oc.fillRect(seekPreview[slot] / length * OW - 1, 0, 2, OH); }
+}
+
+function drawPhase() {
+  const canvas = $("#phase"), c = fit(canvas), W = canvas.width, H = canvas.height;
+  c.clearRect(0, 0, W, H);
+  c.fillStyle = "#242833"; c.fillRect(0, H / 2 - 2, W, 4);
+  c.fillStyle = "#43b581"; c.fillRect(W / 2 - 1, 0, 2, H);
+  const [a, b] = state.decks;
+  if (!a?.bpm || !b?.bpm || a.first_beat == null || b.first_beat == null) { $("#phaseText").textContent = "—"; return; }
+  const phase = d => (((position(d) - d.first_beat) / (60 / d.bpm)) % 1 + 1) % 1;
+  const diff = ((phase(b) - phase(a) + 1.5) % 1) - 0.5;  // beats: + means B is ahead
+  const ms = diff * 60 / (a.bpm * a.pitch) * 1000;
+  const tempoGap = Math.abs(a.bpm * a.pitch - b.bpm * b.pitch);
+  $("#phaseText").textContent = tempoGap > 0.3 ? `tempos differ by ${tempoGap.toFixed(1)} BPM`
+    : Math.abs(ms) < 6 ? "in time" : `B is ${Math.abs(ms).toFixed(0)} ms ${ms > 0 ? "ahead" : "behind"}`;
+  c.fillStyle = Math.abs(ms) < 6 ? "#43b581" : Math.abs(ms) < 25 ? "#f0be3c" : "#ed5555";
+  c.fillRect(W / 2 + diff * W - 4, 0, 8, H);
+}
+
+function frame() {
+  if (state) { drawDeck(0); drawDeck(1); drawPhase(); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
 
 function connect() {
   if (!token) { $("#coverText").textContent = "This page needs your personal link. Use /mixer in Discord to get one."; return; }
@@ -344,8 +479,12 @@ function connect() {
     if (msg.type === "hello") { you = msg.you; $("#cover").style.display = "none"; }
     else if (msg.type === "denied") { $("#coverText").textContent = msg.message; $("#cover").style.display = "flex"; ws.onclose = null; }
     else if (msg.type === "error") toast(msg.message);
+    else if (msg.type === "wave") {
+      const w = msg.wave;
+      waves[msg.slot] = w && {...w, detail: Uint8Array.from(atob(w.detail), ch => ch.charCodeAt(0))};
+    }
     else if (msg.type === "state") {
-      state = msg;
+      state = msg; stateAt = performance.now();
       if (msg.queue) { queue = msg.queue; renderQueue(); }
       render();
     }

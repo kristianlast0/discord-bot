@@ -85,25 +85,37 @@ class DeckFilters:
         return out.astype(np.float32, copy=False)
 
 
-# ── Tempo detection ─────────────────────────────────────────────────
+# ── Tempo and beat grid ─────────────────────────────────────────────
 
-ANALYSIS_RATE = 11025
+ANALYSIS_RATE = 12000  # 48 kHz / 4
+_FFT, _HOP = 512, 64  # 43 ms windows every 5.3 ms
 
 
-def detect_bpm(samples: np.ndarray, rate: int = ANALYSIS_RATE) -> float | None:
-    """Estimate tempo from mono audio: onset strength (spectral flux) then autocorrelation, preferring 80-170 BPM."""
-    if len(samples) < rate * 10:
-        return None
-    n, hop = 1024, 128
-    frames = np.lib.stride_tricks.sliding_window_view(samples, n)[::hop] * np.hanning(n)
+_KICK_HZ = 180  # the beat's position is taken from the bass, where the kick drum is
+
+
+def _onset_envelopes(samples: np.ndarray, rate: int) -> tuple[np.ndarray, np.ndarray, float]:
+    """How sharply the sound gets louder at each moment (spectral flux), across all frequencies and in the bass only,
+    and how many values per second."""
+    frames = np.lib.stride_tricks.sliding_window_view(samples, _FFT)[::_HOP] * np.hanning(_FFT)
     mag = np.log1p(np.abs(np.fft.rfft(frames, axis=1)) * 10)
-    flux = np.maximum(0, np.diff(mag, axis=0)).sum(axis=1)
-    flux -= np.convolve(flux, np.ones(32) / 32, mode="same")  # remove slow loudness changes
-    flux = np.maximum(flux, 0)
-    if not flux.any():
-        return None
-    env_rate = rate / hop
-    ac = np.correlate(flux, flux, mode="full")[len(flux) - 1:]
+    rise = np.maximum(0, np.diff(mag, axis=0))
+    kick_bins = max(2, int(_KICK_HZ / (rate / _FFT)) + 1)
+    envelopes = []
+    for flux in (rise.sum(axis=1), rise[:, 1:kick_bins].sum(axis=1)):
+        flux = np.concatenate([[0.0], flux])
+        flux -= np.convolve(flux, np.ones(64) / 64, mode="same")  # remove slow loudness changes
+        envelopes.append(np.maximum(flux, 0))
+    return envelopes[0], envelopes[1], rate / _HOP
+
+
+def _autocorrelate(x: np.ndarray) -> np.ndarray:
+    spectrum = np.fft.rfft(x, 2 * len(x))
+    return np.fft.irfft(spectrum * np.conj(spectrum))[: len(x)]
+
+
+def _tempo(flux: np.ndarray, env_rate: float) -> float | None:
+    ac = _autocorrelate(flux)
 
     def at(lag: float) -> float:
         i = int(lag)
@@ -119,6 +131,8 @@ def detect_bpm(samples: np.ndarray, rate: int = ANALYSIS_RATE) -> float | None:
     coarse = ((1, 1.0), (2, 0.5), (4, 0.25))
     candidates = np.arange(60.0, 200.0, 0.5)
     scores = [score(b, coarse) * math.exp(-0.5 * (math.log2(b / 120) / 0.9) ** 2) for b in candidates]
+    if max(scores) <= 0:
+        return None
     best = float(candidates[int(np.argmax(scores))])
     # Fine pass: a peak 8-16 beats away pins the tempo down far more precisely than the next beat does.
     fine = ((4, 0.5), (8, 1.0), (16, 1.0))
@@ -128,4 +142,44 @@ def detect_bpm(samples: np.ndarray, rate: int = ANALYSIS_RATE) -> float | None:
         best *= 2
     while best > 180:
         best /= 2
-    return round(best, 1)
+    return round(best, 2)
+
+
+def detect_bpm(samples: np.ndarray, rate: int = ANALYSIS_RATE) -> float | None:
+    grid = beat_grid(samples, rate)
+    return grid[0] if grid else None
+
+
+def beat_grid(samples: np.ndarray, rate: int = ANALYSIS_RATE, start: float = 0.0) -> tuple[float, float] | None:
+    """(BPM, time of a beat in seconds) for mono audio that begins `start` seconds into the track.
+
+    Assumes a steady tempo, which holds for most produced music; the beat time is reduced to within the first beat.
+    """
+    if len(samples) < rate * 10:
+        return None
+    flux, kick, env_rate = _onset_envelopes(samples, rate)
+    if not flux.any():
+        return None
+    bpm = _tempo(flux, env_rate)
+    if not bpm:
+        return None
+    # Hi-hats between the beats are often the sharpest sounds; the kick drum marks the beat itself.
+    phase_env = kick if kick.sum() > 0.05 * flux.sum() else flux
+    period = env_rate * 60 / bpm  # envelope frames per beat
+    beats = np.arange(int((len(phase_env) - 2) / period)) * period
+    offsets = np.arange(0, period, 0.1)
+    energy = [np.interp(o + beats, np.arange(len(phase_env)), phase_env).sum() for o in offsets]
+    offset = offsets[int(np.argmax(energy))]
+    # Envelope value i compares the window starting at i*hop with the one before; the onset sits about half a window in.
+    beat_time = start + (offset * _HOP + _FFT / 2) / rate
+    return float(bpm), float(beat_time % (60 / bpm))
+
+
+def overview(pcm: np.ndarray, columns: int) -> list[int]:
+    """Peak level (0-255) of int16 stereo audio in `columns` slices, for drawing a waveform."""
+    mono = np.abs(pcm.astype(np.int32).sum(axis=1)) // 2
+    if not len(mono):
+        return []
+    edges = np.linspace(0, len(mono), columns + 1).astype(int)
+    peaks = np.maximum.reduceat(mono, np.minimum(edges[:-1], len(mono) - 1))
+    return (np.minimum(peaks, 32767) * 255 // 32767).astype(int).tolist()

@@ -466,6 +466,15 @@ class Music(commands.Cog):
         await _reply(interaction, f"〰️ Crossfade set to {seconds} seconds." if seconds else "〰️ Crossfade off: songs play back to back.")
         await self.player(interaction.guild).refresh_player()
 
+    @dj_group.command(name="beatmatch", description="Match tempos and line up beats when songs mix automatically")
+    async def dj_beatmatch(self, interaction: discord.Interaction, enabled: bool):
+        settings.set_dj(interaction.guild_id, beatmatch=enabled)
+        if enabled:
+            message = "🥁 Beat-matching on: songs within 8% of each other's tempo mix in time."
+        else:
+            message = "🥁 Beat-matching off: songs crossfade without changing speed."
+        await _reply(interaction, message)
+
     @dj_group.command(name="autodj", description="Keep the music going with similar songs when the queue runs out")
     async def dj_autodj(self, interaction: discord.Interaction, enabled: bool):
         settings.set_dj(interaction.guild_id, autodj=enabled)

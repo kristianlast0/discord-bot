@@ -54,7 +54,7 @@ def set_stay(guild_id: int, channel_id: int | None, station: str | None = None) 
     store.save(_FILE, _all())
 
 
-DJ_DEFAULTS = {"crossfade": 6, "autodj": False}
+DJ_DEFAULTS = {"crossfade": 6, "autodj": False, "beatmatch": True}
 
 
 def dj(guild_id: int) -> dict:
