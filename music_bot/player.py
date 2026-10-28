@@ -122,9 +122,9 @@ async def send_mixer_link(interaction: discord.Interaction) -> None:
     """Reply privately with the person's own mixer link."""
     from .web import mixer_link  # web imports this module
 
-    link = mixer_link(interaction.guild_id, interaction.user.id)
+    link = await mixer_link(interaction.guild_id, interaction.user.id)
     if not link:
-        raise UserError("The web mixer isn't set up yet (it needs PUBLIC_URL in the bot's .env).")
+        raise UserError("The web mixer isn't reachable right now (ngrok isn't running on the bot's computer).")
     view = discord.ui.View()
     view.add_item(discord.ui.Button(label="Open the mixer", emoji="🎛️", url=link))
     await interaction.response.send_message(

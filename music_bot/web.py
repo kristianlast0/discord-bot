@@ -14,6 +14,7 @@ import secrets
 import time
 from pathlib import Path
 
+import aiohttp
 import discord
 from aiohttp import WSMsgType, web
 
@@ -64,10 +65,28 @@ def read_token(token: str) -> tuple[int, int] | None:
         return None
 
 
-def mixer_link(guild_id: int, user_id: int) -> str | None:
-    if not config.PUBLIC_URL:
+_NGROK_API = "http://127.0.0.1:4040/api/tunnels"
+
+
+async def public_url() -> str | None:
+    """PUBLIC_URL if set; otherwise ask the local ngrok agent which address it currently has."""
+    if config.PUBLIC_URL:
+        return config.PUBLIC_URL.rstrip("/")
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
+            async with session.get(_NGROK_API) as resp:
+                tunnels = (await resp.json()).get("tunnels", [])
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
         return None
-    return f"{config.PUBLIC_URL.rstrip('/')}/mixer#{make_token(guild_id, user_id)}"
+    for tunnel in tunnels:
+        if tunnel.get("public_url", "").startswith("https://") and str(config.MIXER_PORT) in tunnel.get("config", {}).get("addr", ""):
+            return tunnel["public_url"].rstrip("/")
+    return None
+
+
+async def mixer_link(guild_id: int, user_id: int) -> str | None:
+    base = await public_url()
+    return f"{base}/mixer#{make_token(guild_id, user_id)}" if base else None
 
 
 class MixerServer:

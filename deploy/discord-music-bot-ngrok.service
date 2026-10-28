@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=%h/.local/bin/ngrok http 127.0.0.1:@PORT@ --url=https://@DOMAIN@ --log=stdout --log-level=warn
+ExecStart=%h/.local/bin/ngrok http 127.0.0.1:@PORT@ @URL_FLAG@ --log=stdout --log-level=warn
 Restart=always
 RestartSec=10
 
