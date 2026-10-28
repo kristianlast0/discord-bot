@@ -72,7 +72,10 @@ class MusicBot(commands.Bot):
 async def _run() -> None:
     bot = MusicBot()
     # systemd stops the service with SIGTERM; leave voice channels cleanly instead of vanishing.
-    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(bot.close()))
+    try:
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(bot.close()))
+    except NotImplementedError:  # Windows has no signal handlers in asyncio; Ctrl+C still works
+        pass
     async with bot:
         await bot.start(config.TOKEN)
 

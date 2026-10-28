@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run from WSL: copy the code to the laptop and reinstall/restart there.
+# Copy the code to the machine that runs the bot and reinstall/restart it there.
+# Defaults to Jamie's laptop; deploy elsewhere with HOST=you@your-server deploy/push.sh
 set -euo pipefail
 HOST="${HOST:-jamie@192.168.1.55}"
 cd "$(dirname "$0")/.."

@@ -64,6 +64,26 @@ the page reconnects; after 15 s without it, mixing goes back to automatic.
 4. **Configure** on the laptop: edit `~/discord-music-bot/.env` to set `DISCORD_TOKEN` and `GUILD_ID`, then
    `systemctl --user restart discord-music-bot`.
 
+## For collaborators
+
+The live bot runs on Jamie's laptop and only changes when Jamie deploys it (`deploy/push.sh`). To work on it:
+
+1. **Make your own test bot** so you never need the real token: https://discord.com/developers/applications →
+   New Application → Bot → Reset Token. Invite it to a test server with the link in *First-time setup* below.
+2. **Run it on your computer.** You need Python 3.11+ and [ffmpeg](https://ffmpeg.org/download.html) on your PATH.
+   ```bash
+   python3 -m venv .venv
+   .venv/bin/pip install -r requirements.txt   # Windows: .venv\Scripts\pip install -r requirements.txt
+   cp .env.example .env                        # then fill in DISCORD_TOKEN and GUILD_ID for your test bot
+   .venv/bin/python -m music_bot               # Windows: .venv\Scripts\python -m music_bot
+   ```
+   For the web mixer on your own machine, set `PUBLIC_URL=http://127.0.0.1:8765` in `.env`; `/mixer` links then
+   open locally.
+3. **Send changes as a pull request**: make a branch, push it, and open a PR on GitHub for Jamie to review and deploy.
+
+Never commit `.env`, bot tokens or anything in `data/` (they're in `.gitignore`). To run your own permanent copy on a
+Linux server, `HOST=you@your-server deploy/push.sh` installs it there as a user service, like on the laptop.
+
 ## Running it
 
 - Logs: `journalctl --user -u discord-music-bot -f`
