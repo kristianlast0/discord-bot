@@ -1,0 +1,6 @@
+[Unit]
+Description=Update yt-dlp for the Discord music bot
+
+[Service]
+Type=oneshot
+ExecStart=@APP_DIR@/deploy/update.sh

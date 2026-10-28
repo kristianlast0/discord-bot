@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DJ Mixer</title>
+<style>
+  :root {
+    --bg: #111318; --panel: #1b1e26; --panel2: #242833; --line: #2f3442; --text: #e7e9f0; --dim: #8b91a3;
+    --a: #5865f2; --b: #eb459e; --ok: #43b581; --warn: #f0be3c; --bad: #ed5555;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+  button:hover { border-color: var(--dim); }
+  button.primary { background: var(--a); border-color: var(--a); }
+  button.on { background: var(--ok); border-color: var(--ok); color: #0c1a13; }
+  input[type=text] { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; min-width: 0; }
+  header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 17px; margin: 0 8px 0 0; }
+  .pill { padding: 3px 10px; border-radius: 99px; background: var(--panel2); color: var(--dim); font-size: 13px; }
+  .pill.live { background: var(--bad); color: #fff; }
+  .spacer { flex: 1; }
+  main { display: grid; grid-template-columns: 1fr minmax(300px, 380px) 1fr; gap: 12px; padding: 12px 16px; max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; min-width: 0; }
+  .locked .control { pointer-events: none; opacity: .45; }
+  .deck-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .deck-name { font-weight: 700; letter-spacing: .08em; font-size: 12px; }
+  .deck-a .deck-name { color: var(--a); } .deck-b .deck-name { color: var(--b); }
+  .onair { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 5px; background: var(--ok); color: #0c1a13; visibility: hidden; }
+  .onair.show { visibility: visible; }
+  .title { font-weight: 600; font-size: 15px; margin: 6px 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .title a { color: inherit; text-decoration: none; }
+  .bpm { color: var(--dim); font-variant-numeric: tabular-nums; min-height: 20px; }
+  .deck-body { display: flex; gap: 14px; align-items: center; margin: 12px 0; }
+  .platter { flex: none; width: 170px; height: 170px; border-radius: 50%; background: #0b0b0d; position: relative;
+    box-shadow: 0 0 0 8px var(--panel2), inset 0 0 0 12px #141418, inset 0 0 0 26px #0b0b0d, inset 0 0 0 28px #17171c, inset 0 0 0 44px #0b0b0d, inset 0 0 0 46px #17171c;
+    animation: spin 1.8s linear infinite; animation-play-state: paused; }
+  .platter::after { content: ""; position: absolute; inset: 58px; border-radius: 50%; background: var(--deck-colour); }
+  .platter::before { content: ""; position: absolute; left: calc(50% - 3px); top: 60px; width: 6px; height: 18px; background: #fff; z-index: 1; border-radius: 2px; }
+  .platter.spinning { animation-play-state: running; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .deck-a { --deck-colour: var(--a); } .deck-b { --deck-colour: var(--b); }
+  .pitch { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .pitch input { writing-mode: vertical-lr; direction: rtl; height: 150px; width: 28px; accent-color: var(--deck-colour); }
+  .pitch .val { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--dim); }
+  canvas { display: block; width: 100%; border-radius: 6px; background: #0d0f14; }
+  .zoom { height: 76px; margin-top: 10px; }
+  .over { height: 46px; margin-top: 12px; cursor: pointer; touch-action: none; }
+  .locked .over { cursor: default; }
+  .beatjump { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+  .beatjump button { padding: 4px 9px; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .linein { grid-column: 1 / -1; }
+  .linein[hidden] { display: none; }
+  .linein h2 { font-size: 12px; letter-spacing: .08em; color: var(--dim); margin: 0 0 6px; font-weight: 700; }
+  .linein select { min-width: 0; max-width: 100%; flex: 1 1 220px; }
+  .hmeter { width: 160px; height: 12px; background: var(--panel2); border-radius: 3px; overflow: hidden; }
+  .hmeter div { height: 100%; width: 0; background: linear-gradient(to right, var(--ok) 60%, var(--warn) 82%, var(--bad)); }
+  #goLive { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .phase { margin-top: 14px; }
+  .phase canvas { height: 22px; }
+  .phase .hint { display: flex; justify-content: space-between; }
+  .times { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .transport { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .transport .play { min-width: 80px; }
+  .loadbar { display: flex; gap: 6px; margin-top: 12px; }
+  .loadbar input { flex: 1; }
+  .mixer h2, .queue h2 { font-size: 12px; letter-spacing: .08em; color: var(--dim); margin: 0 0 10px; font-weight: 700; }
+  .strips { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; }
+  .strip { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .knob-wrap { display: flex; flex-direction: column; align-items: center; font-size: 11px; color: var(--dim); user-select: none; }
+  .knob { width: 44px; height: 44px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #3a3f4d, #20232c); border: 2px solid var(--line); position: relative; cursor: ns-resize; touch-action: none; }
+  .knob::after { content: ""; position: absolute; left: calc(50% - 2px); top: 4px; width: 4px; height: 14px; border-radius: 2px; background: var(--deck-colour, var(--text)); transform-origin: 2px 18px; transform: rotate(var(--angle, 0deg)); }
+  .knob.killed { border-color: var(--bad); }
+  .strip-a { --deck-colour: var(--a); } .strip-b { --deck-colour: var(--b); }
+  .meters { display: flex; gap: 6px; align-items: flex-end; }
+  .meter { width: 12px; height: 150px; background: var(--panel2); border-radius: 3px; position: relative; overflow: hidden; }
+  .meter div { position: absolute; bottom: 0; left: 0; right: 0; height: 0; background: linear-gradient(to top, var(--ok) 60%, var(--warn) 82%, var(--bad)); }
+  .fader input { writing-mode: vertical-lr; direction: rtl; height: 130px; width: 28px; accent-color: var(--deck-colour); }
+  .xfader { margin-top: 16px; }
+  .xfader input { width: 100%; accent-color: var(--text); }
+  .xlabels { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; }
+  .xlabels span:first-child { color: var(--a); } .xlabels span:last-child { color: var(--b); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  select { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+  .queue { grid-column: 1 / -1; }
+  .queue ol { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; }
+  .queue li { display: flex; gap: 8px; align-items: center; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  .queue li .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .queue li .d { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .queue li button { padding: 3px 9px; }
+  .queue .lA { color: var(--a); } .queue .lB { color: var(--b); }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--bad); color: #fff; padding: 10px 16px; border-radius: 10px; display: none; max-width: 90vw; }
+  #cover { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; z-index: 5; }
+  .hint { color: var(--dim); font-size: 13px; }
+</style>
+</head>
+<body class="locked">
+<div id="cover"><div><h2>🎛️ DJ Mixer</h2><p id="coverText">Connecting…</p></div></div>
+<header>
+  <h1>🎛️ DJ Mixer</h1>
+  <span class="pill" id="voice">Not in voice</span>
+  <span class="pill" id="mode">Automatic</span>
+  <span class="spacer"></span>
+  <span class="hint" id="youHint"></span>
+  <button id="lineInBtn" title="Play from your own CDJs and mixer">🎙️ Line-in</button>
+  <button id="joinBtn" style="display:none">Join my voice channel</button>
+  <button id="takeBtn" class="primary">Take the decks</button>
+  <button id="releaseBtn" style="display:none">Hand back</button>
+</header>
+
+<main>
+  <section class="panel linein" id="lineInPanel" hidden>
+    <h2>LINE-IN · PLAY FROM YOUR OWN DECKS</h2>
+    <p class="hint" style="margin:0 0 8px">Mixing on real CDJs and a mixer? Plug the mixer's USB audio (or an audio interface on its
+      record or booth output) into this computer, choose it below and go live. Keep listening on your own headphones and
+      monitors: Discord hears you about a second later. Needs Chrome, Edge or Firefox on a computer.
+      Tip: raise the voice channel's bitrate in Discord (Edit Channel → Bitrate) for the best sound.</p>
+    <div class="row">
+      <select id="inputs"><option value="">Allow access to list your inputs</option></select>
+      <button id="allowInputs">Allow access</button>
+      <div class="hmeter" title="Input level"><div id="inLevel"></div></div>
+      <button id="goLive">🔴 Go live</button>
+      <button id="stopLive" style="display:none">■ Stop</button>
+      <span class="hint" id="liveStatus"></span>
+    </div>
+  </section>
+
+  <section class="panel deck deck-a" data-slot="0"></section>
+
+  <section class="panel mixer">
+    <h2>MIXER</h2>
+    <div class="strips">
+      <div class="strip strip-a" data-slot="0"></div>
+      <div class="meters"><div class="meter" id="meterA"><div></div></div><div class="meter" id="meterB"><div></div></div></div>
+      <div class="strip strip-b" data-slot="1"></div>
+    </div>
+    <div class="xfader control">
+      <div class="xlabels"><span>A</span><span>CROSSFADER</span><span>B</span></div>
+      <input type="range" id="xfader" min="0" max="1" step="0.005" value="0">
+    </div>
+    <div class="phase">
+      <div class="hint"><span>BEATS</span><span id="phaseText">—</span></div>
+      <canvas id="phase" title="How far apart the two decks' beats are: centred means in time"></canvas>
+    </div>
+    <div class="row control">
+      <button id="fadeA">◀ Fade to A</button>
+      <select id="fadeSecs"><option value="4">4 s</option><option value="8" selected>8 s</option><option value="16">16 s</option><option value="30">30 s</option></select>
+      <button id="fadeB">Fade to B ▶</button>
+    </div>
+    <div class="row control">
+      <span class="hint">Curve</span>
+      <button id="curveSmooth" class="on">Smooth</button>
+      <button id="curveCut">Cut</button>
+      <button id="quantize" title="Jumps and cue points snap to the beat">Quantise</button>
+      <span class="spacer"></span>
+      <div class="knob-wrap"><div class="knob" id="master" data-min="0" data-max="1.5" data-default="1"></div>MASTER</div>
+    </div>
+  </section>
+
+  <section class="panel deck deck-b" data-slot="1"></section>
+
+  <section class="panel queue">
+    <h2>QUEUE</h2>
+    <div class="row" style="margin-top:0">
+      <input type="text" id="search" placeholder="Song name or YouTube / Spotify link" style="flex:1 1 240px">
+      <button id="addQueue">Add to queue</button>
+      <button id="addA" class="control lA">Load to A</button>
+      <button id="addB" class="control lB">Load to B</button>
+    </div>
+    <ol id="queue"></ol>
+  </section>
+</main>
+<div id="toast"></div>
+
+<template id="deckTpl">
+  <div class="deck-head"><span class="deck-name"></span><span class="onair">ON AIR</span></div>
+  <div class="title">Empty</div>
+  <div class="bpm"></div>
+  <canvas class="zoom" title="Zoomed waveform: the white line is now; beat lines move together when the decks are matched"></canvas>
+  <div class="deck-body">
+    <div class="platter"></div>
+    <div class="pitch control">
+      <span class="hint">PITCH</span>
+      <input type="range" min="-16" max="16" step="0.05" value="0" class="pitchFader" title="Double-click to reset">
+      <span class="val">0.0%</span>
+    </div>
+  </div>
+  <canvas class="over" title="Click or drag to jump"></canvas>
+  <div class="times"><span class="el">0:00</span><span class="rem"></span></div>
+  <div class="transport control">
+    <button class="play">▶ Play</button>
+    <button class="cue" title="Playing: jump back to the cue point and stop. Stopped: set the cue point here">CUE</button>
+    <button class="sync" title="Match tempo and line the beats up with the other deck">SYNC</button>
+    <button class="lock" title="Keep tempo and beats locked to the other deck">LOCK</button>
+    <button class="nudge" data-dir="-1" title="Hold to slow down briefly">◀◀ Nudge</button>
+    <button class="nudge" data-dir="1" title="Hold to speed up briefly">Nudge ▶▶</button>
+  </div>
+  <div class="beatjump control">
+    <span class="hint">Beat jump</span>
+    <button data-beats="-16">−16</button><button data-beats="-4">−4</button><button data-beats="-1">−1</button>
+    <button data-beats="1">+1</button><button data-beats="4">+4</button><button data-beats="16">+16</button>
+  </div>
+</template>
+
+<template id="stripTpl">
+  <div class="knob-wrap control"><div class="knob" data-param="high" data-min="-40" data-max="6" data-default="0"></div>HIGH</div>
+  <div class="knob-wrap control"><div class="knob" data-param="mid" data-min="-40" data-max="6" data-default="0"></div>MID</div>
+  <div class="knob-wrap control"><div class="knob" data-param="low" data-min="-40" data-max="6" data-default="0"></div>LOW</div>
+  <div class="knob-wrap control"><div class="knob" data-param="filter" data-min="-1" data-max="1" data-default="0"></div>FILTER</div>
+  <div class="fader control"><input type="range" min="0" max="1" step="0.01" value="1" class="volFader"></div>
+</template>
+
+<script>
+"use strict";
+const token = location.hash.slice(1);
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+let ws, state = null, you = null, queue = [];
+let stateAt = 0;  // when the latest state arrived, so positions can be moved on smoothly between updates
+const waves = [null, null];  // {overview, detail (Uint8Array), detail_rate, length} per deck
+const seekPreview = [null, null];  // where a drag on the waveform would jump to
+const touched = new Map();  // control key -> time the user last moved it, so incoming state doesn't fight their hand
+const HOLD_MS = 700;
+
+function fmt(s) {
+  if (s == null) return "live";
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.style.display = "none", 4000);
+}
+function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+
+// Coalesce fast slider/knob movement into at most one message per control per animation frame.
+const pending = new Map();
+let flushQueued = false;
+function sendThrottled(key, obj) {
+  touched.set(key, performance.now());
+  pending.set(key, obj);
+  if (!flushQueued) { flushQueued = true; requestAnimationFrame(() => { flushQueued = false; pending.forEach(send); pending.clear(); }); }
+}
+const recentlyTouched = key => performance.now() - (touched.get(key) || 0) < HOLD_MS;
+
+// ── Build the decks and channel strips ──
+for (const deck of $$(".deck")) {
+  const slot = +deck.dataset.slot;
+  deck.append($("#deckTpl").content.cloneNode(true));
+  $(".deck-name", deck).textContent = `DECK ${"AB"[slot]}`;
+  $(".play", deck).onclick = () => send({cmd: state.decks[slot]?.playing ? "pause" : "play", slot});
+  $(".cue", deck).onclick = () => send({cmd: "cue", slot});
+  $(".sync", deck).onclick = () => send({cmd: "sync", slot});
+  $(".lock", deck).onclick = () => send({cmd: "lock", slot, value: !state.decks[slot]?.sync_lock});
+  for (const b of $$(".beatjump button", deck)) b.onclick = () => send({cmd: "beatjump", slot, value: +b.dataset.beats});
+  const over = $(".over", deck);
+  const seekAt = e => {
+    const d = state?.decks[slot];
+    const length = waves[slot]?.length || d?.duration;
+    if (!d || !d.seekable || !length || !state.you_dj) return;
+    const r = over.getBoundingClientRect();
+    const t = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * length;
+    seekPreview[slot] = t;
+    return t;
+  };
+  over.onpointerdown = e => { if (seekAt(e) != null) over.setPointerCapture(e.pointerId); };
+  over.onpointermove = e => { if (over.hasPointerCapture(e.pointerId)) seekAt(e); };
+  over.onpointerup = e => {
+    if (!over.hasPointerCapture(e.pointerId)) return;
+    const t = seekAt(e); seekPreview[slot] = null;
+    if (t != null) send({cmd: "seek", slot, value: t});
+  };
+  const pitch = $(".pitchFader", deck);
+  pitch.oninput = () => sendThrottled(`pitch${slot}`, {cmd: "set", slot, param: "pitch", value: 1 + pitch.value / 100});
+  pitch.ondblclick = () => { pitch.value = 0; pitch.oninput(); };
+  for (const b of $$(".nudge", deck)) {
+    const go = v => e => { e.preventDefault(); send({cmd: "set", slot, param: "nudge", value: v * +b.dataset.dir}); };
+    b.onpointerdown = go(0.04); b.onpointerup = b.onpointerleave = b.onpointercancel = go(0);
+  }
+}
+for (const strip of $$(".strip")) {
+  const slot = +strip.dataset.slot;
+  strip.append($("#stripTpl").content.cloneNode(true));
+  for (const k of $$(".knob", strip)) makeKnob(k, v => sendThrottled(`${k.dataset.param}${slot}`, {cmd: "set", slot, param: k.dataset.param, value: v}), `${k.dataset.param}${slot}`);
+  const vol = $(".volFader", strip);
+  vol.oninput = () => sendThrottled(`volume${slot}`, {cmd: "set", slot, param: "volume", value: +vol.value});
+}
+makeKnob($("#master"), v => sendThrottled("master", {cmd: "mixer", param: "master", value: v}), "master");
+
+// Knobs turn through 270°, with the default (0 dB, filter off) straight up, like a real mixer.
+function makeKnob(el, onChange, key) {
+  const min = +el.dataset.min, max = +el.dataset.max, def = +el.dataset.default;
+  const toT = v => v < def ? 0.5 * (v - min) / (def - min) : 0.5 + 0.5 * (v - def) / (max - def);
+  const fromT = t => t < 0.5 ? min + (def - min) * t / 0.5 : def + (max - def) * (t - 0.5) / 0.5;
+  el.setValue = v => {
+    el.value = Math.min(max, Math.max(min, v));
+    el.t = toT(el.value);
+    el.style.setProperty("--angle", `${-135 + 270 * el.t}deg`);
+    el.classList.toggle("killed", ["low", "mid", "high"].includes(el.dataset.param) && el.value <= min + 0.5);
+  };
+  el.setValue(def);
+  const turn = t => { t = Math.min(1, Math.max(0, t)); if (Math.abs(t - 0.5) < 0.02) t = 0.5; el.setValue(fromT(t)); onChange(el.value); };
+  let startY = 0, startT = 0;
+  el.onpointerdown = e => { el.setPointerCapture(e.pointerId); startY = e.clientY; startT = el.t; };
+  el.onpointermove = e => { if (el.hasPointerCapture(e.pointerId)) turn(startT + (startY - e.clientY) / 160); };
+  el.ondblclick = () => turn(0.5);
+  el.onwheel = e => { e.preventDefault(); turn(el.t - Math.sign(e.deltaY) / 40); };
+  el.dataset.key = key;
+}
+
+// ── Mixer controls ──
+const xf = $("#xfader");
+xf.oninput = () => sendThrottled("crossfader", {cmd: "mixer", param: "crossfader", value: +xf.value});
+$("#fadeA").onclick = () => send({cmd: "mixer", param: "autofade", value: [0, +$("#fadeSecs").value]});
+$("#fadeB").onclick = () => send({cmd: "mixer", param: "autofade", value: [1, +$("#fadeSecs").value]});
+$("#curveSmooth").onclick = () => send({cmd: "mixer", param: "curve", value: "smooth"});
+$("#curveCut").onclick = () => send({cmd: "mixer", param: "curve", value: "cut"});
+$("#quantize").onclick = () => send({cmd: "mixer", param: "quantize", value: !state.mixer.quantize});
+$("#takeBtn").onclick = () => send({cmd: "take"});
+$("#releaseBtn").onclick = () => send({cmd: "release"});
+$("#joinBtn").onclick = () => send({cmd: "join"});
+const query = () => $("#search").value.trim();
+$("#addQueue").onclick = () => { if (query()) { send({cmd: "queue_add", query: query()}); $("#search").value = ""; } };
+$("#addA").onclick = () => { if (query()) { send({cmd: "load_search", slot: 0, query: query()}); $("#search").value = ""; } };
+$("#addB").onclick = () => { if (query()) { send({cmd: "load_search", slot: 1, query: query()}); $("#search").value = ""; } };
+$("#search").onkeydown = e => { if (e.key === "Enter") $("#addQueue").click(); };
+
+function renderQueue() {
+  const ol = $("#queue");
+  ol.innerHTML = "";
+  if (!queue.length) { ol.innerHTML = `<li class="hint">The queue is empty. Add songs above, or with /play in Discord.</li>`; return; }
+  queue.forEach((t, i) => {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="d">${i + 1}.</span><span class="t"></span><span class="d">${fmt(t.duration)}</span>
+      <button class="control lA" title="Load onto deck A">A</button><button class="control lB" title="Load onto deck B">B</button><button class="control" title="Remove">✕</button>`;
+    $(".t", li).textContent = (t.auto ? "🤖 " : t.filler ? "📻 " : "") + t.title;
+    const [a, b, x] = $$("button", li);
+    a.onclick = () => send({cmd: "load", slot: 0, index: i});
+    b.onclick = () => send({cmd: "load", slot: 1, index: i});
+    x.onclick = () => send({cmd: "queue_remove", index: i});
+    ol.append(li);
+  });
+}
+
+// ── Showing state ──
+function render() {
+  const s = state;
+  document.body.classList.toggle("locked", !s.you_dj);
+  $("#voice").textContent = s.voice ? `🔊 ${s.voice}` : "Not in voice";
+  const mode = $("#mode");
+  mode.textContent = s.live ? `LIVE: ${s.live.name}` : "Automatic";
+  mode.classList.toggle("live", !!s.live);
+  $("#takeBtn").style.display = s.you_dj ? "none" : "";
+  $("#releaseBtn").style.display = s.you_dj ? "" : "none";
+  $("#joinBtn").style.display = s.voice ? "none" : "";
+  $("#youHint").textContent = s.you_dj ? "You're on the decks" : !s.in_voice ? "Join the bot's voice channel to take the decks" : s.live ? "Watching" : "";
+
+  s.decks.forEach((d, slot) => {
+    const el = $$(".deck")[slot], strip = $$(".strip")[slot];
+    $(".onair", el).classList.toggle("show", !!d?.on_air && !!d?.playing);
+    const title = $(".title", el);
+    if (!d) {
+      title.textContent = "Empty — load a track from the queue";
+      $(".bpm", el).textContent = ""; $(".platter", el).classList.remove("spinning");
+      $(".el", el).textContent = ""; $(".rem", el).textContent = "";
+      $(`#meter${"AB"[slot]} div`).style.height = "0";
+      return;
+    }
+    if (title.dataset.t !== d.title) {
+      title.dataset.t = d.title;
+      title.innerHTML = "";
+      const a = document.createElement(d.page_url ? "a" : "span");
+      if (d.page_url) { a.href = d.page_url; a.target = "_blank"; a.rel = "noopener"; }
+      a.textContent = d.title; title.append(a);
+    }
+    const pitchPct = (d.pitch - 1) * 100;
+    $(".bpm", el).textContent = d.bpm ? `${d.bpm.toFixed(1)} BPM` + (Math.abs(pitchPct) > 0.05 ? ` → ${d.effective_bpm.toFixed(1)}` : "")
+      : "BPM: detecting…";
+    const platter = $(".platter", el);
+    platter.classList.toggle("spinning", d.playing && !s.paused);
+    platter.style.animationDuration = `${1.8 / (d.pitch * (1 + d.nudge))}s`;
+    if (!recentlyTouched(`pitch${slot}`)) $(".pitchFader", el).value = pitchPct.toFixed(2);
+    $(".pitch .val", el).textContent = `${pitchPct >= 0 ? "+" : ""}${pitchPct.toFixed(1)}%`;
+    const length = waves[slot]?.length || d.duration;
+    $(".el", el).textContent = d.ended ? "Ended" : fmt(d.elapsed) + (d.seekable && !d.complete ? ` · loading ${fmt(d.loaded)}` : "");
+    $(".rem", el).textContent = length && d.seekable ? `-${fmt((length - d.elapsed) / d.pitch)}` : "LIVE";
+    $(".lock", el).classList.toggle("on", d.sync_lock);
+    for (const b of $$(".nudge", el)) b.disabled = d.sync_lock;
+    for (const b of $$(".beatjump button, .cue, .over", el)) b.style.opacity = d.seekable ? "" : ".35";
+    $(".play", el).textContent = d.playing ? "❚❚ Pause" : "▶ Play";
+    $(".play", el).classList.toggle("on", d.playing);
+    for (const k of $$(".knob", strip)) if (!recentlyTouched(k.dataset.key)) k.setValue(d[k.dataset.param]);
+    if (!recentlyTouched(`volume${slot}`)) $(".volFader", strip).value = d.volume;
+    const db = d.level > 0 ? 20 * Math.log10(d.level) : -60;
+    $(`#meter${"AB"[slot]} div`).style.height = `${Math.max(0, Math.min(100, (db + 48) / 48 * 100))}%`;
+  });
+  if (!recentlyTouched("crossfader")) xf.value = s.mixer.crossfader;
+  if (!recentlyTouched("master")) $("#master").setValue(s.mixer.master);
+  $("#curveSmooth").classList.toggle("on", s.mixer.curve === "smooth");
+  $("#curveCut").classList.toggle("on", s.mixer.curve === "cut");
+  $("#quantize").classList.toggle("on", s.mixer.quantize);
+  if (lineWanted && s.line_in && s.you_dj) $("#liveStatus").textContent = `🔴 On air · bot has ${s.line_in.buffer.toFixed(1)} s in hand`;
+}
+
+// ── Waveforms and the phase meter, drawn every animation frame ──
+function position(d) {  // where a deck is now, moving it on from the last update
+  return d.elapsed + (d.playing && !state.paused ? d.rate * (performance.now() - stateAt) / 1000 : 0);
+}
+function fit(canvas) {
+  const w = canvas.clientWidth * devicePixelRatio, h = canvas.clientHeight * devicePixelRatio;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  return canvas.getContext("2d");
+}
+const COLOURS = ["#5865f2", "#eb459e"];
+const ZOOM_SECONDS = 4;  // the zoomed view shows this much real time either side of now
+
+function drawDeck(slot) {
+  const el = $$(".deck")[slot], d = state.decks[slot], wave = waves[slot];
+  const zoom = $(".zoom", el), over = $(".over", el);
+  const zc = fit(zoom), oc = fit(over);
+  zc.clearRect(0, 0, zoom.width, zoom.height); oc.clearRect(0, 0, over.width, over.height);
+  if (!d) return;
+  const pos = position(d), colour = COLOURS[slot];
+  const W = zoom.width, H = zoom.height, mid = H / 2;
+
+  // Zoomed view: real time across, so both decks' beats line up when they're matched.
+  const pxPerSec = W / (2 * ZOOM_SECONDS), speed = d.pitch * (1 + d.nudge);
+  if (wave) {
+    zc.fillStyle = colour;
+    for (let x = 0; x < W; x++) {
+      const t = pos + (x - W / 2) / pxPerSec * speed;
+      const i = Math.floor(t * wave.detail_rate);
+      if (i < 0 || i >= wave.detail.length) continue;
+      const h = wave.detail[i] / 255 * (H / 2 - 2);
+      zc.fillRect(x, mid - h, 1, 2 * h);
+    }
+  } else if (d.seekable) {
+    zc.fillStyle = "#8b91a3"; zc.font = `${12 * devicePixelRatio}px system-ui`; zc.fillText("Loading waveform…", 10, mid);
+  }
+  if (d.bpm != null && d.first_beat != null) {
+    const period = 60 / d.bpm;
+    const first = Math.ceil((pos - ZOOM_SECONDS * speed - d.first_beat) / period);
+    for (let k = first; ; k++) {
+      const t = d.first_beat + k * period, x = W / 2 + (t - pos) / speed * pxPerSec;
+      if (x > W) break;
+      zc.fillStyle = k % 4 === 0 ? "rgba(255,255,255,.75)" : "rgba(255,255,255,.28)";
+      zc.fillRect(x, 0, k % 4 === 0 ? 2 : 1, H);
+    }
+  }
+  zc.fillStyle = "#fff"; zc.fillRect(W / 2 - 1, 0, 2, H);
+
+  // Whole track: click to jump. Shaded part has downloaded; the marker is the cue point.
+  const OW = over.width, OH = over.height, length = wave?.length || d.duration;
+  if (!length) { oc.fillStyle = colour; oc.fillRect(0, 0, OW, OH); return; }
+  if (wave) {
+    const n = wave.overview.length;
+    for (let x = 0; x < OW; x++) {
+      const h = wave.overview[Math.floor(x / OW * n)] / 255 * (OH / 2 - 1);
+      oc.fillStyle = x / OW * length < pos ? colour : "#4a5063";
+      oc.fillRect(x, OH / 2 - h, 1, 2 * h);
+    }
+  } else {
+    oc.fillStyle = "#2f3442"; oc.fillRect(0, OH / 2 - 2, OW * Math.min(1, d.loaded / length), 4);
+    oc.fillStyle = colour; oc.fillRect(0, OH / 2 - 2, OW * Math.min(1, pos / length), 4);
+  }
+  oc.fillStyle = "#f0be3c"; oc.fillRect(d.cue / length * OW - 1, 0, 3, OH);
+  oc.fillStyle = "#fff"; oc.fillRect(pos / length * OW - 1, 0, 2, OH);
+  if (seekPreview[slot] != null) { oc.fillStyle = "rgba(255,255,255,.5)"; oc.fillRect(seekPreview[slot] / length * OW - 1, 0, 2, OH); }
+}
+
+function drawPhase() {
+  const canvas = $("#phase"), c = fit(canvas), W = canvas.width, H = canvas.height;
+  c.clearRect(0, 0, W, H);
+  c.fillStyle = "#242833"; c.fillRect(0, H / 2 - 2, W, 4);
+  c.fillStyle = "#43b581"; c.fillRect(W / 2 - 1, 0, 2, H);
+  const [a, b] = state.decks;
+  if (!a?.bpm || !b?.bpm || a.first_beat == null || b.first_beat == null) { $("#phaseText").textContent = "—"; return; }
+  const phase = d => (((position(d) - d.first_beat) / (60 / d.bpm)) % 1 + 1) % 1;
+  const diff = ((phase(b) - phase(a) + 1.5) % 1) - 0.5;  // beats: + means B is ahead
+  const ms = diff * 60 / (a.bpm * a.pitch) * 1000;
+  const tempoGap = Math.abs(a.bpm * a.pitch - b.bpm * b.pitch);
+  $("#phaseText").textContent = tempoGap > 0.3 ? `tempos differ by ${tempoGap.toFixed(1)} BPM`
+    : Math.abs(ms) < 6 ? "in time" : `B is ${Math.abs(ms).toFixed(0)} ms ${ms > 0 ? "ahead" : "behind"}`;
+  c.fillStyle = Math.abs(ms) < 6 ? "#43b581" : Math.abs(ms) < 25 ? "#f0be3c" : "#ed5555";
+  c.fillRect(W / 2 + diff * W - 4, 0, 8, H);
+}
+
+function frame() {
+  if (state) { drawDeck(0); drawDeck(1); drawPhase(); }
+  drawInputLevel();
+  requestAnimationFrame(frame);
+}
+
+// ── Line-in: record the chosen input and stream it to the bot ──
+let lineStream = null, lineRec = null, lineWs = null, lineWanted = false, analyser = null, levelBuf = null;
+const inputs = $("#inputs");
+$("#lineInBtn").onclick = () => { const p = $("#lineInPanel"); p.hidden = !p.hidden; if (!p.hidden) listInputs(); };
+$("#allowInputs").onclick = async () => {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({audio: true});
+    s.getTracks().forEach(t => t.stop());
+    await listInputs();
+  } catch (e) { toast("The browser didn't allow access to your audio inputs."); }
+};
+inputs.onchange = () => { try { localStorage.setItem("lineInput", inputs.value); } catch {} if (lineStream) openInput(); };
+
+async function listInputs() {
+  if (!navigator.mediaDevices?.enumerateDevices) { $("#liveStatus").textContent = "This browser can't record audio inputs."; return; }
+  const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+  if (!devices.length || !devices[0].label) return;  // labels appear once access is allowed
+  let saved = null; try { saved = localStorage.getItem("lineInput"); } catch {}
+  inputs.innerHTML = "";
+  devices.forEach((d, i) => {
+    const o = document.createElement("option"); o.value = d.deviceId; o.textContent = d.label || `Input ${i + 1}`;
+    if (d.deviceId === saved) o.selected = true;
+    inputs.append(o);
+  });
+  $("#allowInputs").style.display = "none";
+}
+
+async function openInput() {
+  lineStream?.getTracks().forEach(t => t.stop());
+  lineStream = await navigator.mediaDevices.getUserMedia({audio: {
+    deviceId: inputs.value ? {exact: inputs.value} : undefined,
+    echoCancellation: false, noiseSuppression: false, autoGainControl: false,  // music, not a voice call
+    channelCount: {ideal: 2}, sampleRate: {ideal: 48000},
+  }});
+  const ctx = new AudioContext();
+  analyser = ctx.createAnalyser(); analyser.fftSize = 2048; levelBuf = new Float32Array(analyser.fftSize);
+  ctx.createMediaStreamSource(lineStream).connect(analyser);  // only to the meter, never to the speakers
+  if (lineRec && lineRec.state !== "inactive") { lineRec.stop(); startRecorder(); }
+}
+
+function drawInputLevel() {
+  if (!analyser) return;
+  analyser.getFloatTimeDomainData(levelBuf);
+  let sum = 0; for (const v of levelBuf) sum += v * v;
+  const db = 10 * Math.log10(sum / levelBuf.length + 1e-12);
+  $("#inLevel").style.width = `${Math.max(0, Math.min(100, (db + 54) / 54 * 100))}%`;
+}
+
+function recorderType() {
+  for (const t of ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"])
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+  return null;
+}
+
+function startRecorder() {
+  lineRec = new MediaRecorder(lineStream, {mimeType: recorderType(), audioBitsPerSecond: 192000});
+  lineRec.ondataavailable = e => { if (e.data.size && lineWs?.readyState === 1) lineWs.send(e.data); };
+  lineRec.start(100);  // a chunk every 100 ms
+}
+
+function connectLine() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  lineWs = new WebSocket(`${proto}://${location.host}/mixer/linein`);
+  lineWs.onopen = () => lineWs.send(JSON.stringify({token}));
+  lineWs.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "live") { startRecorder(); $("#liveStatus").textContent = "🔴 On air"; }
+    else if (msg.type === "denied" || msg.type === "error") { toast(msg.message); stopLive(false); }
+    else if (msg.type === "ended") { toast(msg.message); stopLive(false); }
+  };
+  lineWs.onclose = () => {
+    if (lineRec && lineRec.state !== "inactive") lineRec.stop();
+    if (lineWanted) { $("#liveStatus").textContent = "Connection lost, reconnecting…"; setTimeout(connectLine, 1500); }
+  };
+}
+
+$("#goLive").onclick = async () => {
+  if (!recorderType()) { toast("This browser can't stream audio. Use Chrome, Edge or Firefox on a computer."); return; }
+  try { await openInput(); } catch (e) { toast("Couldn't open that input. Check it's plugged in and allowed."); return; }
+  lineWanted = true;
+  $("#goLive").style.display = "none"; $("#stopLive").style.display = "";
+  $("#liveStatus").textContent = "Connecting…";
+  connectLine();
+};
+$("#stopLive").onclick = () => stopLive(true);
+function stopLive(tell) {
+  lineWanted = false;
+  if (lineRec && lineRec.state !== "inactive") lineRec.stop();
+  if (tell) send({cmd: "line_in_stop"});
+  lineWs?.close();
+  $("#goLive").style.display = ""; $("#stopLive").style.display = "none";
+  $("#liveStatus").textContent = "";
+}
+requestAnimationFrame(frame);
+
+function connect() {
+  if (!token) { $("#coverText").textContent = "This page needs your personal link. Use /mixer in Discord to get one."; return; }
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/mixer/ws`);
+  ws.onopen = () => send({token});
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "hello") { you = msg.you; $("#cover").style.display = "none"; }
+    else if (msg.type === "denied") { $("#coverText").textContent = msg.message; $("#cover").style.display = "flex"; ws.onclose = null; }
+    else if (msg.type === "error") toast(msg.message);
+    else if (msg.type === "wave") {
+      const w = msg.wave;
+      waves[msg.slot] = w && {...w, detail: Uint8Array.from(atob(w.detail), ch => ch.charCodeAt(0))};
+    }
+    else if (msg.type === "state") {
+      state = msg; stateAt = performance.now();
+      if (msg.queue) { queue = msg.queue; renderQueue(); }
+      render();
+    }
+  };
+  ws.onclose = () => { $("#coverText").textContent = "Reconnecting…"; $("#cover").style.display = "flex"; setTimeout(connect, 2000); };
+}
+connect();
+</script>
+</body>
+</html>

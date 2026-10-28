@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from discord import app_commands
+
+
+class TrackError(Exception):
+    """A track couldn't be found or played; the message is shown to the user."""
+
+
+class UserError(app_commands.AppCommandError):
+    """Something the user did wrong; shown to them as-is."""
+
+
+@dataclass(eq=False)
+class Track:
+    title: str
+    # "ytdl": a page URL or "ytsearch1:..." query that yt-dlp resolves when the track starts
+    # "local": a path relative to MUSIC_DIR
+    # "stream": a direct audio stream URL (internet radio)
+    kind: str
+    source: str
+    duration: int | None = None  # seconds; None for radio and unknown lengths
+    page_url: str | None = None  # link shown in embeds
+    requester: str | None = None
+    filler: bool = False  # the 24/7 station, played when the queue is empty; anyone can replace it
+    auto: bool = False  # picked by Auto-DJ; anyone can skip it
+    # (yt-dlp info, time fetched) from the lookup, reused if the track starts soon after
+    resolved: tuple[dict, float] | None = field(default=None, repr=False)
+
+    @property
+    def requester_id(self) -> int | None:
+        match = re.fullmatch(r"<@!?(\d+)>", self.requester or "")
+        return int(match.group(1)) if match else None
+
+    def to_dict(self) -> dict:
+        return {
+            "title": self.title,
+            "kind": self.kind,
+            "source": self.source,
+            "duration": self.duration,
+            "page_url": self.page_url,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict, requester: str | None = None) -> Track:
+        return cls(
+            title=data["title"],
+            kind=data["kind"],
+            source=data["source"],
+            duration=data.get("duration"),
+            page_url=data.get("page_url"),
+            requester=requester,
+        )
+
+
+def fmt_duration(seconds: int | float | None) -> str:
+    if seconds is None:
+        return "live"
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02}:{s:02}" if h else f"{m}:{s:02}"
