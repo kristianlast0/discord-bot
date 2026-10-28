@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run on the laptop (no sudo needed): sets up Python 3.12 + dependencies and the user services.
+# Run on the machine that will host the bot (no sudo needed): sets up Python 3.12 + dependencies and the user services.
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 export PATH="$HOME/.local/bin:$PATH"
@@ -21,6 +21,10 @@ done
 systemctl --user daemon-reload
 systemctl --user enable --now discord-music-bot-update.timer
 systemctl --user enable discord-music-bot.service
+
+if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != "yes" ]; then
+  echo "Note: to keep the bot running after you log out, run once: sudo loginctl enable-linger $USER"
+fi
 
 if grep -q '^DISCORD_TOKEN=.\+' "$APP_DIR/.env"; then
   systemctl --user restart discord-music-bot.service

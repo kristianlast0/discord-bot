@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 _NET_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
 # Cut silence at the start, and any gap over 4 s (long fade-outs, hidden-track gaps), so mixes land on music.
 _TRIM = "silenceremove=start_periods=1:start_threshold=-50dB:stop_periods=-1:stop_duration=4:stop_threshold=-50dB"
-_LEVEL = "dynaudnorm=f=250:g=15"  # evens out loudness between songs; cheap enough for the laptop
+_LEVEL = "dynaudnorm=f=250:g=15"  # evens out loudness between songs; cheap enough for a low-power machine
 _IDLE_CHECK = 15  # seconds
 _QUICK_FAIL = 3  # a track that ends this fast didn't really play
 _NOTICE_LIFETIME = 30  # seconds before warnings delete themselves

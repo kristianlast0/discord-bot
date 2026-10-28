@@ -1,0 +1,27 @@
+# Run your own copy: fill in .env (copy .env.example), then `docker compose up -d`.
+# With the web mixer shared through ngrok: `docker compose --profile mixer up -d` (see README).
+services:
+  music-bot:
+    build: .
+    env_file: .env
+    environment:  # these win over .env, so paths match the folders mounted below
+      DATA_DIR: /data
+      MUSIC_DIR: /music
+      MIXER_HOST: 0.0.0.0
+      MIXER_PORT: "8765"
+    volumes:
+      - ./data:/data          # settings, playlists, stations, beat grids
+      - ./music:/music:ro     # optional: your own music files for /local
+    ports:
+      - "127.0.0.1:8765:8765" # web mixer, reachable only from this computer unless you add ngrok
+    shm_size: "1gb"           # decks hold whole songs in shared memory so DJs can jump around
+    restart: unless-stopped
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    profiles: ["mixer"]
+    command: http music-bot:8765 --url=https://${NGROK_DOMAIN}
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    depends_on: [music-bot]
+    restart: unless-stopped
