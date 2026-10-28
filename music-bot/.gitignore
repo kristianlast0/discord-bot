@@ -3,3 +3,5 @@
 data/
 __pycache__/
 *.pyc
+deploy/.host
+music/

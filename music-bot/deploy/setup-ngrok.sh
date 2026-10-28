@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run on the laptop (no sudo): installs ngrok and runs it as a service, giving the web mixer a public https address.
+# Run on the machine that hosts the bot (no sudo): installs ngrok and runs it as a service, giving the web mixer a public https address.
 # Usage: bash ~/discord-music-bot/deploy/setup-ngrok.sh <ngrok authtoken> [your-static-domain.ngrok-free.app]
 # Without a static domain ngrok picks a new address each time it starts; the bot asks ngrok for it when making links.
 set -euo pipefail

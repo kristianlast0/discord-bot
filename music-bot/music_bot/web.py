@@ -106,8 +106,8 @@ class MixerServer:
     async def start(self) -> None:
         self._runner = web.AppRunner(self._app, access_log=None)
         await self._runner.setup()
-        await web.TCPSite(self._runner, "127.0.0.1", config.MIXER_PORT).start()
-        log.info("Web mixer listening on 127.0.0.1:%d (public URL: %s)", config.MIXER_PORT, config.PUBLIC_URL or "not set")
+        await web.TCPSite(self._runner, config.MIXER_HOST, config.MIXER_PORT).start()
+        log.info("Web mixer listening on %s:%d (public URL: %s)", config.MIXER_HOST, config.MIXER_PORT, config.PUBLIC_URL or "not set")
 
     async def stop(self) -> None:
         if self._runner:
