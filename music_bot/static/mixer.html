@@ -51,6 +51,13 @@
   .locked .over { cursor: default; }
   .beatjump { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
   .beatjump button { padding: 4px 9px; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .linein { grid-column: 1 / -1; }
+  .linein[hidden] { display: none; }
+  .linein h2 { font-size: 12px; letter-spacing: .08em; color: var(--dim); margin: 0 0 6px; font-weight: 700; }
+  .linein select { min-width: 0; max-width: 100%; flex: 1 1 220px; }
+  .hmeter { width: 160px; height: 12px; background: var(--panel2); border-radius: 3px; overflow: hidden; }
+  .hmeter div { height: 100%; width: 0; background: linear-gradient(to right, var(--ok) 60%, var(--warn) 82%, var(--bad)); }
+  #goLive { background: var(--bad); border-color: var(--bad); color: #fff; }
   .phase { margin-top: 14px; }
   .phase canvas { height: 22px; }
   .phase .hint { display: flex; justify-content: space-between; }
@@ -97,12 +104,29 @@
   <span class="pill" id="mode">Automatic</span>
   <span class="spacer"></span>
   <span class="hint" id="youHint"></span>
+  <button id="lineInBtn" title="Play from your own CDJs and mixer">🎙️ Line-in</button>
   <button id="joinBtn" style="display:none">Join my voice channel</button>
   <button id="takeBtn" class="primary">Take the decks</button>
   <button id="releaseBtn" style="display:none">Hand back</button>
 </header>
 
 <main>
+  <section class="panel linein" id="lineInPanel" hidden>
+    <h2>LINE-IN · PLAY FROM YOUR OWN DECKS</h2>
+    <p class="hint" style="margin:0 0 8px">Mixing on real CDJs and a mixer? Plug the mixer's USB audio (or an audio interface on its
+      record or booth output) into this computer, choose it below and go live. Keep listening on your own headphones and
+      monitors: Discord hears you about a second later. Needs Chrome, Edge or Firefox on a computer.
+      Tip: raise the voice channel's bitrate in Discord (Edit Channel → Bitrate) for the best sound.</p>
+    <div class="row">
+      <select id="inputs"><option value="">Allow access to list your inputs</option></select>
+      <button id="allowInputs">Allow access</button>
+      <div class="hmeter" title="Input level"><div id="inLevel"></div></div>
+      <button id="goLive">🔴 Go live</button>
+      <button id="stopLive" style="display:none">■ Stop</button>
+      <span class="hint" id="liveStatus"></span>
+    </div>
+  </section>
+
   <section class="panel deck deck-a" data-slot="0"></section>
 
   <section class="panel mixer">
@@ -378,6 +402,7 @@ function render() {
   $("#curveSmooth").classList.toggle("on", s.mixer.curve === "smooth");
   $("#curveCut").classList.toggle("on", s.mixer.curve === "cut");
   $("#quantize").classList.toggle("on", s.mixer.quantize);
+  if (lineWanted && s.line_in && s.you_dj) $("#liveStatus").textContent = `🔴 On air · bot has ${s.line_in.buffer.toFixed(1)} s in hand`;
 }
 
 // ── Waveforms and the phase meter, drawn every animation frame ──
@@ -465,7 +490,102 @@ function drawPhase() {
 
 function frame() {
   if (state) { drawDeck(0); drawDeck(1); drawPhase(); }
+  drawInputLevel();
   requestAnimationFrame(frame);
+}
+
+// ── Line-in: record the chosen input and stream it to the bot ──
+let lineStream = null, lineRec = null, lineWs = null, lineWanted = false, analyser = null, levelBuf = null;
+const inputs = $("#inputs");
+$("#lineInBtn").onclick = () => { const p = $("#lineInPanel"); p.hidden = !p.hidden; if (!p.hidden) listInputs(); };
+$("#allowInputs").onclick = async () => {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({audio: true});
+    s.getTracks().forEach(t => t.stop());
+    await listInputs();
+  } catch (e) { toast("The browser didn't allow access to your audio inputs."); }
+};
+inputs.onchange = () => { try { localStorage.setItem("lineInput", inputs.value); } catch {} if (lineStream) openInput(); };
+
+async function listInputs() {
+  if (!navigator.mediaDevices?.enumerateDevices) { $("#liveStatus").textContent = "This browser can't record audio inputs."; return; }
+  const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+  if (!devices.length || !devices[0].label) return;  // labels appear once access is allowed
+  let saved = null; try { saved = localStorage.getItem("lineInput"); } catch {}
+  inputs.innerHTML = "";
+  devices.forEach((d, i) => {
+    const o = document.createElement("option"); o.value = d.deviceId; o.textContent = d.label || `Input ${i + 1}`;
+    if (d.deviceId === saved) o.selected = true;
+    inputs.append(o);
+  });
+  $("#allowInputs").style.display = "none";
+}
+
+async function openInput() {
+  lineStream?.getTracks().forEach(t => t.stop());
+  lineStream = await navigator.mediaDevices.getUserMedia({audio: {
+    deviceId: inputs.value ? {exact: inputs.value} : undefined,
+    echoCancellation: false, noiseSuppression: false, autoGainControl: false,  // music, not a voice call
+    channelCount: {ideal: 2}, sampleRate: {ideal: 48000},
+  }});
+  const ctx = new AudioContext();
+  analyser = ctx.createAnalyser(); analyser.fftSize = 2048; levelBuf = new Float32Array(analyser.fftSize);
+  ctx.createMediaStreamSource(lineStream).connect(analyser);  // only to the meter, never to the speakers
+  if (lineRec && lineRec.state !== "inactive") { lineRec.stop(); startRecorder(); }
+}
+
+function drawInputLevel() {
+  if (!analyser) return;
+  analyser.getFloatTimeDomainData(levelBuf);
+  let sum = 0; for (const v of levelBuf) sum += v * v;
+  const db = 10 * Math.log10(sum / levelBuf.length + 1e-12);
+  $("#inLevel").style.width = `${Math.max(0, Math.min(100, (db + 54) / 54 * 100))}%`;
+}
+
+function recorderType() {
+  for (const t of ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"])
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+  return null;
+}
+
+function startRecorder() {
+  lineRec = new MediaRecorder(lineStream, {mimeType: recorderType(), audioBitsPerSecond: 192000});
+  lineRec.ondataavailable = e => { if (e.data.size && lineWs?.readyState === 1) lineWs.send(e.data); };
+  lineRec.start(100);  // a chunk every 100 ms
+}
+
+function connectLine() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  lineWs = new WebSocket(`${proto}://${location.host}/mixer/linein`);
+  lineWs.onopen = () => lineWs.send(JSON.stringify({token}));
+  lineWs.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "live") { startRecorder(); $("#liveStatus").textContent = "🔴 On air"; }
+    else if (msg.type === "denied" || msg.type === "error") { toast(msg.message); stopLive(false); }
+    else if (msg.type === "ended") { toast(msg.message); stopLive(false); }
+  };
+  lineWs.onclose = () => {
+    if (lineRec && lineRec.state !== "inactive") lineRec.stop();
+    if (lineWanted) { $("#liveStatus").textContent = "Connection lost, reconnecting…"; setTimeout(connectLine, 1500); }
+  };
+}
+
+$("#goLive").onclick = async () => {
+  if (!recorderType()) { toast("This browser can't stream audio. Use Chrome, Edge or Firefox on a computer."); return; }
+  try { await openInput(); } catch (e) { toast("Couldn't open that input. Check it's plugged in and allowed."); return; }
+  lineWanted = true;
+  $("#goLive").style.display = "none"; $("#stopLive").style.display = "";
+  $("#liveStatus").textContent = "Connecting…";
+  connectLine();
+};
+$("#stopLive").onclick = () => stopLive(true);
+function stopLive(tell) {
+  lineWanted = false;
+  if (lineRec && lineRec.state !== "inactive") lineRec.stop();
+  if (tell) send({cmd: "line_in_stop"});
+  lineWs?.close();
+  $("#goLive").style.display = ""; $("#stopLive").style.display = "none";
+  $("#liveStatus").textContent = "";
 }
 requestAnimationFrame(frame);
 

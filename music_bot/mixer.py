@@ -25,6 +25,9 @@ FRAME_SECONDS = 0.02
 SILENCE = b"\0" * FRAME
 PITCH_RANGE = 0.16  # the pitch fader goes ±16%
 NUDGE = 0.04  # holding nudge speeds up or slows down by 4%
+LIVE_TARGET = 0.4  # seconds of line-in audio kept buffered, to ride out network hiccups
+LIVE_MAX = 1.2  # beyond this the deck skips ahead, so a long set doesn't slowly fall behind
+LIVE_TRIM = 0.005  # line-in plays up to ±0.5% fast or slow (inaudible) to hold the buffer steady
 
 
 def frames(seconds: float) -> int:
@@ -174,6 +177,8 @@ class Deck:
         self.grid: tuple[float, float] | None = None  # (BPM, a beat's time in seconds), from analysis
         self.sync_lock = False  # keep tempo and beats locked to the other deck
         self.sync_mult = 1.0  # 2 or 0.5 when synced in double or half time
+        self.live_input = False  # a DJ's line-in: stay close to real time instead of playing every sample
+        self._buffering = True
         self.cue_point = 0.0  # seconds
         self.wave: dict | None = None  # waveform data for the mixer page, once the download finishes
         self.level = 0.0  # loudness after the fader, for the meters
@@ -197,6 +202,9 @@ class Deck:
 
     @property
     def rate(self) -> float:
+        if self.live_input:  # the DJ's sound card and ours never tick at exactly the same speed: follow theirs
+            behind = (self.store.written - self.position) / RATE
+            return 1 + max(-LIVE_TRIM, min(LIVE_TRIM, (behind - LIVE_TARGET) * 0.02))
         return max(0.5, self.pitch * (1 + self.nudge))
 
     @property
@@ -278,6 +286,14 @@ class Deck:
         if not self.playing:
             self.level = 0.0
             return None
+        if self.live_input:
+            behind = self.store.written - self.position
+            if behind > LIVE_MAX * RATE:
+                self.position = self.store.written - LIVE_TARGET * RATE
+            elif self._buffering and behind < LIVE_TARGET * RATE:
+                self.level = 0.0
+                return None
+            self._buffering = False
         fade_this = self._jump is not None
         rate = self.rate
         start = int(self.position)
@@ -286,6 +302,7 @@ class Deck:
         available = len(src) - 1 - frac
         if available <= 0:
             self.level = 0.0
+            self._buffering = True  # ran dry: build the buffer back up before carrying on
             return None
         count = min(SAMPLES, int(available / rate))
         if count <= 0:

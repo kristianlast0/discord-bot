@@ -43,6 +43,14 @@ Automatic mixes beat-match songs within ±8% (`/dj beatmatch`), then ease the pi
 page or leaves voice for a minute, it hands back to automatic mixing. Discord's own skip/loop/shuffle buttons are
 disabled while someone is live; `/play` still adds to the queue for the DJ.
 
+### Line-in (real CDJs and mixers)
+
+The mixer page's **🎙️ Line-in** panel lets a DJ in the voice channel stream their own mixer's output (its USB audio,
+or an audio interface on its record/booth out) to the bot. The browser records it as Opus with echo cancellation, noise
+suppression and auto-gain off, and sends it over `/mixer/linein` (`linein.py`); the bot plays it on a deck and glides
+the crossfader over. The deck keeps ~0.4 s buffered and corrects clock drift by up to ±0.5%. If the connection drops,
+the page reconnects; after 15 s without it, mixing goes back to automatic.
+
 ## First-time setup
 
 1. **Create the bot**: https://discord.com/developers/applications → New Application → **Bot** → Reset Token,

@@ -15,7 +15,7 @@ import time
 import discord
 import numpy as np
 
-from . import booth, config, dsp, radio, settings, store, tracks
+from . import booth, config, dsp, linein, radio, settings, store, tracks
 from .mixer import FRAME_SECONDS, NUDGE, PITCH_RANGE, Deck, Mixer, frames
 from .models import Track, TrackError, UserError, fmt_duration
 
@@ -436,14 +436,14 @@ class GuildPlayer:
             except discord.HTTPException:
                 pass
 
-    def _on_air(self) -> tuple[int, Deck] | None:
+    def _on_air(self, include_line_in: bool = True) -> tuple[int, Deck] | None:
         """The (slot, deck) people mostly hear."""
         mixer = self._mixer
         if not mixer:
             return None
         best, best_gain = None, 0.0
         for slot, deck in enumerate(mixer.slots):
-            if deck and deck.playing and not deck.finished:
+            if deck and deck.playing and not deck.finished and (include_line_in or not deck.live_input):
                 gain = deck.volume * deck.gain * (mixer.crossfader_gain(slot) if mixer.manual else 1.0)
                 if gain > best_gain:
                     best, best_gain = (slot, deck), gain
@@ -929,11 +929,14 @@ class GuildPlayer:
             mixer = self._mixer
             if not mixer:
                 return
-            on_air = self._on_air()
+            on_air = self._on_air(include_line_in=False)  # a DJ's line-in leaves with them
             for slot, deck in enumerate(mixer.slots):
                 if not deck or (on_air and deck is on_air[1]):
                     continue
-                if deck.playing and not deck.finished:
+                if deck.live_input:
+                    deck.fade_out(frames(2))
+                    asyncio.create_task(self._eject_later(deck, 2.5))  # its fade stalls if the audio has stopped
+                elif deck.playing and not deck.finished:
                     deck.fade_out(frames(2))
                 else:
                     mixer.load(slot, None)
@@ -951,6 +954,54 @@ class GuildPlayer:
             await self.start()
         await self.notice(f"🎛️ {name} has left the decks. Back to automatic mixing.", lifetime=60)
         await self.refresh_player()
+
+    async def linein_start(self, member: discord.Member, audio: discord.AudioSource) -> None:
+        """Put a DJ's own decks on air: their line-in goes on a deck and the crossfader glides over to it."""
+        if self.live_dj and self.live_dj[0] != member.id and not member.guild_permissions.manage_guild:
+            raise UserError(f"{self.live_dj[1]} is on the decks right now.")
+        self.check_listener(member)
+        async with self._lock:
+            mixer = self._ensure_mixer()
+            if not mixer:
+                raise UserError("I couldn't start the audio.")
+            if self._priming:
+                self._priming.cancel()
+            self._primed = None
+            track = Track(f"🎙️ {member.display_name} {linein.TITLE_SUFFIX}", "stream", linein.SOURCE, requester=member.mention)
+            deck = Deck(track, audio, lookahead=frames(5))
+            deck.live_input = True
+            # A reconnect replaces the old line-in deck; otherwise use the deck that isn't on air.
+            old = next((i for i, d in enumerate(mixer.slots) if d and d.track.source == linein.SOURCE), None)
+            slot = old if old is not None else (1 - self._slot if self._deck else 0)
+            for d in mixer.decks:
+                d.clear_fades()
+                d.sync_lock = False
+            mixer.load(slot, deck)
+            first_time = not (self.live_dj and mixer.manual)
+            mixer.manual = True
+            if first_time:
+                mixer.crossfader = float(1 - slot)
+                mixer.move_crossfader(float(slot), 3.0)  # fade from whatever was playing into the DJ
+            else:
+                mixer.crossfader = float(slot)
+            self.live_dj = (member.id, member.display_name)
+            self.current, self._deck, self._slot = track, deck, slot
+        if first_time:
+            await self.notice(f"🎙️ {member.display_name} is live from their own decks.", lifetime=60)
+        await self.refresh_player(repost=first_time)
+
+    async def linein_stop(self, member_id: int) -> None:
+        """The DJ stopped their line-in: fade it out and go back to automatic mixing."""
+        mixer = self._mixer
+        if not mixer or not self.live_dj or self.live_dj[0] != member_id:
+            return
+        await self.live_release()
+
+    async def _eject_later(self, deck: Deck, seconds: float) -> None:
+        await asyncio.sleep(seconds)
+        slot = self._mixer.slot_of(deck) if self._mixer else None
+        if slot is not None:
+            self._mixer.load(slot, None)
 
     def _live_deck(self, slot: int) -> Deck:
         if not self.live_dj or not self._mixer:
@@ -1202,6 +1253,8 @@ class GuildPlayer:
                 "quantize": self.quantize,
             },
             "decks": decks,
+            "line_in": next(({"name": d.track.title, "buffer": round((d.store.written - d.position) / 48000, 2)}
+                             for d in (mixer.decks if mixer else []) if d.live_input), None),
             "queue_key": hash(tuple(id(t) for t in self.queue[:50])),
         }
 

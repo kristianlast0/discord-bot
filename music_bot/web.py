@@ -18,14 +18,15 @@ import aiohttp
 import discord
 from aiohttp import WSMsgType, web
 
-from . import config, store, tracks
+from . import config, linein, store, tracks
 from .models import TrackError, UserError
 
 log = logging.getLogger(__name__)
 
 TOKEN_LIFETIME = 12 * 3600
 _SECRET_FILE = "mixer_secret.json"
-_STATE_EVERY = 0.1  # seconds between state updates to each page
+_STATE_EVERY = 0.25  # seconds between state updates to each page (the page animates in between; ngrok's free plan has 1 GB/month)
+_LINE_IN_GRACE = 15  # seconds a dropped line-in connection has to come back before mixing goes back to automatic
 _SEAT_GRACE = 60  # seconds the DJ can be gone (page closed, or out of voice) before mixing goes back to automatic
 _PAGE = (Path(__file__).parent / "static" / "mixer.html").read_text()
 
@@ -97,7 +98,9 @@ class MixerServer:
         self._release_tasks: dict[int, asyncio.Task] = {}
         self._runner: web.AppRunner | None = None
         app = web.Application()
-        app.add_routes([web.get("/", self._home), web.get("/mixer", self._page), web.get("/mixer/ws", self._socket)])
+        app.add_routes([web.get("/", self._home), web.get("/mixer", self._page), web.get("/mixer/ws", self._socket),
+                        web.get("/mixer/linein", self._line_in)])
+        self._line_in_stops: dict[int, asyncio.Task] = {}
         self._app = app
 
     async def start(self) -> None:
@@ -167,6 +170,77 @@ class MixerServer:
                 if player.live_dj and player.live_dj[0] == user_id:
                     self._schedule_release(guild.id, player, user_id)
         return ws
+
+    async def _identify(self, ws: web.WebSocketResponse) -> tuple[discord.Guild, discord.Member] | None:
+        """Read the token the page sends first; reply "denied" and return None if it's no good."""
+        try:
+            first = await ws.receive_json(timeout=10)
+        except (asyncio.TimeoutError, TypeError, ValueError):
+            return None
+        ids = read_token(str(first.get("token", "")))
+        guild = self.bot.get_guild(ids[0]) if ids else None
+        member = guild.get_member(ids[1]) if guild else None
+        if not member:
+            await ws.send_json({"type": "denied", "message": "This mixer link has expired or isn't valid, or you're not in the voice channel. Get a fresh link with /mixer."})
+            return None
+        return guild, member
+
+    async def _line_in(self, request: web.Request) -> web.WebSocketResponse:
+        """Audio from a DJ's own decks: binary chunks from the page's recorder, played on a deck."""
+        ws = web.WebSocketResponse(heartbeat=20, max_msg_size=1024 * 1024)
+        await ws.prepare(request)
+        who = await self._identify(ws)
+        if not who:
+            await ws.close()
+            return ws
+        guild, member = who
+        player = self.music.player(guild)
+        if not self._in_voice(guild, player, member.id):
+            # If the bot isn't in voice yet, follow the DJ into theirs.
+            if not player.voice and member.voice and member.voice.channel:
+                try:
+                    self.music.check_voice_allowed(guild, member.voice.channel)
+                    await player.connect(member.voice.channel)
+                except (UserError, discord.ClientException) as e:
+                    await ws.send_json({"type": "error", "message": str(e)})
+                    await ws.close()
+                    return ws
+            else:
+                await ws.send_json({"type": "error", "message": "Join the bot's voice channel in Discord first."})
+                await ws.close()
+                return ws
+        pending = self._line_in_stops.pop(guild.id, None)
+        if pending:
+            pending.cancel()
+        audio = linein.LineInAudio()
+        try:
+            await player.linein_start(member, audio)
+        except UserError as e:
+            audio.cleanup()
+            await ws.send_json({"type": "error", "message": str(e)})
+            await ws.close()
+            return ws
+        await ws.send_json({"type": "live"})
+        log.info("%s is live from line-in", member.display_name)
+        try:
+            async for msg in ws:
+                if msg.type != WSMsgType.BINARY:
+                    continue
+                if not player.live_dj or player.live_dj[0] != member.id:  # handed back, or a manager took over
+                    await ws.send_json({"type": "ended", "message": "You're no longer on air."})
+                    break
+                audio.feed(msg.data)
+        finally:
+            if player.live_dj and player.live_dj[0] == member.id:
+                self._line_in_stops[guild.id] = asyncio.create_task(self._stop_line_in_later(guild.id, player, member.id))
+        await ws.close()
+        return ws
+
+    async def _stop_line_in_later(self, guild_id: int, player, user_id: int) -> None:
+        """Give a dropped connection a moment to come back (the page retries) before leaving the decks."""
+        await asyncio.sleep(_LINE_IN_GRACE)
+        self._line_in_stops.pop(guild_id, None)
+        await player.linein_stop(user_id)
 
     def _schedule_release(self, guild_id: int, player, user_id: int) -> None:
         async def later():
@@ -244,6 +318,12 @@ class MixerServer:
                 raise UserError("Join a voice channel in Discord first.")
             self.music.check_voice_allowed(guild, member.voice.channel)
             await player.connect(member.voice.channel)
+            return
+        if cmd == "line_in_stop":  # the DJ pressed Stop on their line-in
+            task = self._line_in_stops.pop(guild.id, None)
+            if task:
+                task.cancel()
+            await player.linein_stop(user_id)
             return
         if cmd == "take":
             if not member:
