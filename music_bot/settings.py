@@ -52,3 +52,16 @@ def set_stay(guild_id: int, channel_id: int | None, station: str | None = None) 
     else:
         guild.pop("stay", None)
     store.save(_FILE, _all())
+
+
+DJ_DEFAULTS = {"crossfade": 6, "autodj": False}
+
+
+def dj(guild_id: int) -> dict:
+    """DJ settings: crossfade length in seconds (0 = off) and whether Auto-DJ keeps the queue going."""
+    return {**DJ_DEFAULTS, **_all().get(str(guild_id), {}).get("dj", {})}
+
+
+def set_dj(guild_id: int, **changes) -> None:
+    _all().setdefault(str(guild_id), {}).setdefault("dj", {}).update(changes)
+    store.save(_FILE, _all())

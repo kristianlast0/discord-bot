@@ -437,6 +437,27 @@ class Music(commands.Cog):
         playlists.delete(interaction.guild_id, name)
         await _reply(interaction, f"🗑️ Deleted **{saved[0]}**.")
 
+    # ── DJ ──────────────────────────────────────────────────────────
+
+    dj_group = app_commands.Group(name="dj", description="Mixing and Auto-DJ", guild_only=True)
+
+    @dj_group.command(name="crossfade", description="How long songs overlap when one mixes into the next")
+    @app_commands.describe(seconds="0 turns crossfading off; 6 is a good default")
+    async def dj_crossfade(self, interaction: discord.Interaction, seconds: app_commands.Range[int, 0, 12]):
+        settings.set_dj(interaction.guild_id, crossfade=seconds)
+        await _reply(interaction, f"〰️ Crossfade set to {seconds} seconds." if seconds else "〰️ Crossfade off: songs play back to back.")
+        await self.player(interaction.guild).refresh_player()
+
+    @dj_group.command(name="autodj", description="Keep the music going with similar songs when the queue runs out")
+    async def dj_autodj(self, interaction: discord.Interaction, enabled: bool):
+        settings.set_dj(interaction.guild_id, autodj=enabled)
+        if enabled:
+            message = "🤖 Auto-DJ on: when the queue runs out I'll keep playing songs like the last one."
+        else:
+            message = "🤖 Auto-DJ off."
+        await _reply(interaction, message)
+        await self.player(interaction.guild).refresh_player()
+
     # ── 24/7 mode ───────────────────────────────────────────────────
 
     stay_group = app_commands.Group(

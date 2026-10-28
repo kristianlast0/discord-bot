@@ -26,6 +26,7 @@ class Track:
     page_url: str | None = None  # link shown in embeds
     requester: str | None = None
     filler: bool = False  # the 24/7 station, played when the queue is empty; anyone can replace it
+    auto: bool = False  # picked by Auto-DJ; anyone can skip it
     # (yt-dlp info, time fetched) from the lookup, reused if the track starts soon after
     resolved: tuple[dict, float] | None = field(default=None, repr=False)
 

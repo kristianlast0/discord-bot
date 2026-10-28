@@ -72,6 +72,20 @@ async def lookup(query: str, requester: str | None) -> list[Track]:
     return found
 
 
+_VIDEO_ID_RE = re.compile(r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/)|youtu\.be/)([\w-]{11})")
+
+
+def video_id(url: str | None) -> str | None:
+    match = _VIDEO_ID_RE.search(url or "")
+    return match.group(1) if match else None
+
+
+async def related(video: str) -> list[Track]:
+    """Songs from YouTube's own "Mix" for a video: what Auto-DJ picks from."""
+    info = await _ytdl(f"https://www.youtube.com/watch?v={video}&list=RD{video}", {**_LOOKUP_OPTS, "noplaylist": False, "playlistend": 30})
+    return [_from_entry(e, None) for e in info.get("entries") or [] if e and e.get("title") not in _UNAVAILABLE]
+
+
 async def local(query: str, requester: str | None) -> list[Track]:
     return await asyncio.get_running_loop().run_in_executor(None, library.tracks_for, query, requester)
 

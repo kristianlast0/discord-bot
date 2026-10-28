@@ -14,6 +14,7 @@ YouTube, because bots can't stream Spotify), music files on the laptop, and inte
 | `/radio browse` | Private station browser: worldwide stations by country and style, or search (radio-browser.info) |
 | `/radio panel` | Posts a permanent Radio panel (Saved / World / Search buttons) in the music channel |
 | `/247 on [station]` · `off` | 24/7 mode (server managers): stay in the voice channel around the clock, rejoin after restarts, and play the station when the queue is empty |
+| `/dj crossfade <0-12>` · `/dj autodj <on/off>` | DJ mode: songs crossfade on two decks (default 6 s); Auto-DJ adds similar songs when the queue runs out |
 | `/musicchannel [#channel]` | Restrict music commands and the player message to one channel |
 | `/pause` `/resume` `/skip` `/stop` `/leave` | Playback control (you need to be in the bot's voice channel) |
 | `/queue [page]` `/nowplaying` | What's playing and what's next |
@@ -21,6 +22,13 @@ YouTube, because bots can't stream Spotify), music files on the laptop, and inte
 | `/playlist save` · `load` · `list` · `show` · `delete` | Saved playlists (only the creator or a server manager can overwrite or delete one) |
 
 The bot leaves after `IDLE_TIMEOUT` seconds (default 5 minutes) of nothing playing or nobody listening, unless 24/7 mode is on.
+
+## The DJ booth
+
+The player message is a DJ booth: an animated picture of two turntables and a mixer (`booth.py`), with buttons for
+Pause, Skip, Stop, Loop, Shuffle, Mix now, Crossfade length and Auto-DJ. Each song plays on the other deck from the one
+before; the next song is loaded ~25 s early and mixed in with an equal-power crossfade (`mixer.py`). Every song goes
+through ffmpeg's `dynaudnorm` (even loudness) and `silenceremove` (no silent intros or long silent gaps).
 
 ## First-time setup
 
