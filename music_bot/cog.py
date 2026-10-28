@@ -9,7 +9,7 @@ from discord.ext import commands
 
 from . import config, library, playlists, radio, settings, tracks
 from .models import Track, TrackError, UserError, fmt_duration
-from .player import GuildPlayer
+from .player import GuildPlayer, send_mixer_link
 from .radio_ui import RadioBrowser, RadioPanel
 
 log = logging.getLogger(__name__)
@@ -59,14 +59,18 @@ class Music(commands.Cog):
         voice = getattr(interaction.user, "voice", None)
         if not voice or not voice.channel:
             raise UserError("Join a voice channel first.")
-        stay = settings.stay(interaction.guild_id)
-        if stay and voice.channel.id != stay["channel"]:
-            raise UserError(f"I'm in 24/7 mode in <#{stay['channel']}>. Join me there.")
-        p = self.player(interaction.guild)
-        vc = p.voice
-        if vc and vc.is_connected() and vc.channel != voice.channel and p.active:
-            raise UserError(f"I'm already playing in {vc.channel.mention}. Join me there.")
+        self.check_voice_allowed(interaction.guild, voice.channel)
         return voice.channel
+
+    def check_voice_allowed(self, guild: discord.Guild, channel) -> None:
+        """Whether the bot may play in `channel` (24/7 mode pins it to one channel; it won't leave mid-song)."""
+        stay = settings.stay(guild.id)
+        if stay and channel.id != stay["channel"]:
+            raise UserError(f"I'm in 24/7 mode in <#{stay['channel']}>. Join me there.")
+        p = self.player(guild)
+        vc = p.voice
+        if vc and vc.is_connected() and vc.channel != channel and p.active:
+            raise UserError(f"I'm already playing in {vc.channel.mention}. Join me there.")
 
     def _control(self, interaction: discord.Interaction) -> GuildPlayer:
         """For commands that change playback: caller must be in the bot's channel."""
@@ -79,6 +83,11 @@ class Music(commands.Cog):
         p = self.player(interaction.guild)
         await p.connect(channel)
         p.channel = interaction.channel
+        if p.live_dj:  # the live DJ chooses what plays; songs wait in the queue for them
+            position = p.add(found, front=front)
+            await p.refresh_player()
+            await interaction.followup.send(f"➕ {_summary(found, position, False)} {p.live_dj[1]} is mixing live and will pick it up.", ephemeral=True)
+            return
         if p.current and p.current.filler:  # music takes over from the 24/7 station
             position = p.add(found, front=True)
             p.skip()
@@ -102,6 +111,10 @@ class Music(commands.Cog):
         p = self.player(interaction.guild)
         await p.connect(channel)
         p.channel = interaction.channel
+        if p.live_dj:
+            p.add([track])
+            await p.refresh_player()
+            return f"📻 **{track.title}** is in the queue for {p.live_dj[1]}, who's mixing live."
         if p.current and p.current.kind == "stream":
             p.add([track], front=True)
             if not p.can_skip_now(interaction.user):
@@ -438,6 +451,11 @@ class Music(commands.Cog):
         await _reply(interaction, f"🗑️ Deleted **{saved[0]}**.")
 
     # ── DJ ──────────────────────────────────────────────────────────
+
+    @app_commands.command(description="Open the web mixer: two decks, EQ, pitch, BPM sync and a crossfader")
+    @app_commands.guild_only()
+    async def mixer(self, interaction: discord.Interaction):
+        await send_mixer_link(interaction)
 
     dj_group = app_commands.Group(name="dj", description="Mixing and Auto-DJ", guild_only=True)
 

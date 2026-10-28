@@ -15,6 +15,7 @@ YouTube, because bots can't stream Spotify), music files on the laptop, and inte
 | `/radio panel` | Posts a permanent Radio panel (Saved / World / Search buttons) in the music channel |
 | `/247 on [station]` · `off` | 24/7 mode (server managers): stay in the voice channel around the clock, rejoin after restarts, and play the station when the queue is empty |
 | `/dj crossfade <0-12>` · `/dj autodj <on/off>` | DJ mode: songs crossfade on two decks (default 6 s); Auto-DJ adds similar songs when the queue runs out |
+| `/mixer` | Your personal link to the web mixer (also the 🎛️ button on the booth) |
 | `/musicchannel [#channel]` | Restrict music commands and the player message to one channel |
 | `/pause` `/resume` `/skip` `/stop` `/leave` | Playback control (you need to be in the bot's voice channel) |
 | `/queue [page]` `/nowplaying` | What's playing and what's next |
@@ -29,6 +30,16 @@ The player message is a DJ booth: an animated picture of two turntables and a mi
 Pause, Skip, Stop, Loop, Shuffle, Mix now, Crossfade length and Auto-DJ. Each song plays on the other deck from the one
 before; the next song is loaded ~25 s early and mixed in with an equal-power crossfade (`mixer.py`). Every song goes
 through ffmpeg's `dynaudnorm` (even loudness) and `silenceremove` (no silent intros or long silent gaps).
+
+## The web mixer (live DJ)
+
+`/mixer` gives each person a personal link (signed with their Discord ID, valid 12 hours) to a web page served by the
+bot on `127.0.0.1:8765` and published through ngrok (`deploy/setup-ngrok.sh`, which sets `PUBLIC_URL`). Anyone can
+watch; someone in the bot's voice channel can **Take the decks**, which switches the mixer to live mode: two decks with
+play/cue, pitch (±16%) and nudge, 3-band EQ with kills, a one-knob filter, channel faders, a crossfader (smooth/cut
+curve, auto-fade), master volume, BPM detection (`dsp.py`, cached in `data/bpm.json`) and Sync. If the DJ closes the
+page or leaves voice for a minute, it hands back to automatic mixing. Discord's own skip/loop/shuffle buttons are
+disabled while someone is live; `/play` still adds to the queue for the DJ.
 
 ## First-time setup
 

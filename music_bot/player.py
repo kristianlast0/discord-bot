@@ -12,9 +12,10 @@ import tempfile
 import time
 
 import discord
+import numpy as np
 
-from . import booth, config, radio, settings, tracks
-from .mixer import FRAME_SECONDS, Deck, Mixer, frames
+from . import booth, config, dsp, radio, settings, store, tracks
+from .mixer import FRAME_SECONDS, NUDGE, PITCH_RANGE, Deck, Mixer, frames
 from .models import Track, TrackError, UserError, fmt_duration
 
 log = logging.getLogger(__name__)
@@ -39,6 +40,9 @@ _BOOTH_EVERY = 30  # seconds between booth redraws while playing...
 _BOOTH_MIXING_EVERY = 3  # ...and while two decks are mixing
 _CROSSFADE_STEPS = (0, 3, 6, 10)
 _AUTODJ_LENGTH = (60, 600)  # Auto-DJ skips clips and hour-long mixes
+_LIVE_BOOTH_EVERY = 4  # seconds between booth redraws while someone mixes live
+_BPM_FILE = "bpm.json"
+_ANALYSE_FROM, _ANALYSE_SECONDS = 15, 60  # which part of a song tempo detection listens to
 
 
 def _audio_options(track: Track) -> str:
@@ -84,12 +88,50 @@ class YtdlpAudio(discord.FFmpegPCMAudio):
         super().cleanup()
 
 
+def _decode_for_analysis(playable: tracks.Playable) -> np.ndarray:
+    """A minute of mono, low-rate audio for tempo detection (blocking; run in an executor)."""
+    ffmpeg = ["ffmpeg", "-nostdin", "-loglevel", "error", "-ss", str(_ANALYSE_FROM), "-t", str(_ANALYSE_SECONDS)]
+    out = ["-vn", "-ac", "1", "-ar", str(dsp.ANALYSIS_RATE), "-f", "f32le", "pipe:1"]
+    if playable.info:
+        fd, path = tempfile.mkstemp(prefix="music-bot-bpm-", suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump(playable.info, f)
+        try:
+            ytdlp = subprocess.Popen([sys.executable, "-m", "yt_dlp", "--quiet", "--no-warnings", "--no-progress",
+                                      "-f", "bestaudio/best", "--load-info-json", path, "-o", "-"],
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            result = subprocess.run(ffmpeg + ["-i", "pipe:0"] + out, stdin=ytdlp.stdout, capture_output=True, timeout=120)
+            ytdlp.kill()
+            ytdlp.wait()
+        finally:
+            os.unlink(path)
+    else:
+        result = subprocess.run(ffmpeg + ["-i", playable.url] + out, capture_output=True, timeout=120)
+    return np.frombuffer(result.stdout, np.float32)
+
+
 def _audio_for(playable: tracks.Playable, track: Track) -> discord.AudioSource:
     options = _audio_options(track)
     if playable.info:
         return YtdlpAudio(playable.info, options)
     remote = playable.url.startswith(("http://", "https://"))
     return discord.FFmpegPCMAudio(playable.url, before_options=_NET_BEFORE if remote else "", options=options)
+
+
+async def send_mixer_link(interaction: discord.Interaction) -> None:
+    """Reply privately with the person's own mixer link."""
+    from .web import mixer_link  # web imports this module
+
+    link = mixer_link(interaction.guild_id, interaction.user.id)
+    if not link:
+        raise UserError("The web mixer isn't set up yet (it needs PUBLIC_URL in the bot's .env).")
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="Open the mixer", emoji="🎛️", url=link))
+    await interaction.response.send_message(
+        "Your personal mixer link (valid 12 hours, don't share it, it acts as you). "
+        "Anyone can watch; to take the decks you need to be in the bot's voice channel.",
+        view=view, ephemeral=True,
+    )
 
 
 class PlayerControls(discord.ui.View):
@@ -112,10 +154,13 @@ class PlayerControls(discord.ui.View):
         self.crossfade.label = f"Crossfade: {dj['crossfade']}s" if dj["crossfade"] else "Crossfade: off"
         self.autodj.label = "Auto-DJ: on" if dj["autodj"] else "Auto-DJ: off"
         self.autodj.style = discord.ButtonStyle.success if dj["autodj"] else discord.ButtonStyle.secondary
-        self.mix_now.disabled = not p.has_next
+        self.mix_now.disabled = not p.has_next or bool(p.live_dj)
+        for item in (self.skip, self.loop, self.shuffle, self.crossfade, self.autodj):
+            item.disabled = bool(p.live_dj)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        self.player.check_listener(interaction.user)
+        if interaction.data.get("custom_id") != self.mixer.custom_id:  # anyone may open the mixer to watch
+            self.player.check_listener(interaction.user)
         return True
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item) -> None:
@@ -183,6 +228,10 @@ class PlayerControls(discord.ui.View):
         settings.set_dj(self.player.guild_id, autodj=not settings.dj(self.player.guild_id)["autodj"])
         await self._redraw(interaction)
 
+    @discord.ui.button(emoji="🎛️", label="Mixer", style=discord.ButtonStyle.secondary, row=1)
+    async def mixer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await send_mixer_link(interaction)
+
 
 class GuildPlayer:
     def __init__(self, bot: discord.Client, guild_id: int):
@@ -214,6 +263,9 @@ class GuildPlayer:
         self._filler_failures = 0
         self._filler_retry_at = 0.0
         self._filler_retry_task: asyncio.Task | None = None
+        self.live_dj: tuple[int, str] | None = None  # (member ID, name) of whoever is mixing live
+        self.consoles = 0  # open mixer pages; tempo detection only runs when someone might use it
+        self.queue_version = 0  # bumped whenever the queue changes, so mixer pages know to redraw it
 
     # ── State ───────────────────────────────────────────────────────
 
@@ -280,11 +332,16 @@ class GuildPlayer:
         if not self.in_charge(member, affected):
             raise UserError(f"Only a server manager can {action} while other people's music is queued. Use Skip to vote instead.")
 
+    def check_not_live(self) -> None:
+        if self.live_dj:
+            raise UserError(f"🎧 {self.live_dj[1]} is mixing live, so the decks are theirs. Open the mixer with `/mixer` to watch.")
+
     def skip_votes_needed(self) -> int:
         return len(self.listeners()) // 2 + 1  # more than half the people listening
 
     def vote_skip(self, member: discord.Member, mix: bool = False) -> tuple[bool, str]:
         """Skip (or mix out) now if the member may, otherwise count their vote. Returns (skipped, message for them)."""
+        self.check_not_live()
         if not self.current or not self.active:
             raise UserError("Nothing is playing.")
         if mix and not self.has_next:
@@ -366,23 +423,40 @@ class GuildPlayer:
             except discord.HTTPException:
                 pass
 
+    def _on_air(self) -> tuple[int, Deck] | None:
+        """The (slot, deck) people mostly hear."""
+        mixer = self._mixer
+        if not mixer:
+            return None
+        best, best_gain = None, 0.0
+        for slot, deck in enumerate(mixer.slots):
+            if deck and deck.playing and not deck.finished:
+                gain = deck.volume * deck.gain * (mixer.crossfader_gain(slot) if mixer.manual else 1.0)
+                if gain > best_gain:
+                    best, best_gain = (slot, deck), gain
+        return best
+
     def _booth_view(self) -> booth.BoothView:
         decks: list[booth.DeckView | None] = [None, None]
-        main, slot = self._deck, self._slot
-        others = [d for d in (self._mixer.decks if self._mixer else []) if d is not main and not d.finished]
+        mixer, main, slot = self._mixer, self._deck, self._slot
         spinning = not self.paused
-        if main:
-            decks[slot] = booth.DeckView(main.track.title, main.elapsed, main.track.duration, spinning, main.gain, True)
-        if others:
-            out = others[0]
-            decks[1 - slot] = booth.DeckView(out.track.title, out.elapsed, out.track.duration, spinning, out.gain, False)
+        for i, deck in enumerate(mixer.slots if mixer else (None, None)):
+            if not deck or (deck.finished and not (mixer and mixer.manual)):
+                continue
+            level = deck.volume * deck.gain * (mixer.crossfader_gain(i) if mixer.manual else 1.0)
+            decks[i] = booth.DeckView(deck.track.title, deck.elapsed, deck.track.duration,
+                                      spinning and deck.playing and not deck.finished, level if deck.playing else 0.0, deck is main)
+        idle = 1 - slot
+        if decks[idle] is None and self.queue and not (mixer and mixer.manual):
+            cued = self.queue[0]
+            decks[idle] = booth.DeckView(cued.title, 0, cued.duration, False, 0.0, False)
+        if mixer and mixer.manual:
+            crossfader = mixer.crossfader
         else:
-            cued = self._primed.track if self._primed else (self.queue[0] if self.queue else None)
-            if cued:
-                decks[1 - slot] = booth.DeckView(cued.title, 0, cued.duration, False, 0.0, False)
-        crossfader = float(slot)
-        if main and others:  # mid-mix: the fader slides toward the incoming deck
-            crossfader = (1 - slot) + (slot - (1 - slot)) * main.gain
+            crossfader = float(slot)
+            other = mixer.slots[idle] if mixer else None
+            if main and other and other.playing and not other.finished:  # mid-mix: the fader slides toward the incoming deck
+                crossfader = idle + (slot - idle) * main.gain
         return booth.BoothView(decks=(decks[0], decks[1]), crossfader=crossfader, paused=self.paused, footer="")
 
     def now_playing_embed(self) -> discord.Embed:
@@ -393,7 +467,8 @@ class GuildPlayer:
             return embed
         embed.title = track.title[:256]
         embed.url = track.page_url
-        embed.set_author(name=("⏸️ Paused" if self.paused else "▶️ Now playing") + f" · Deck {'AB'[self._slot]}")
+        state = "⏸️ Paused" if self.paused else f"🎧 Live: {self.live_dj[1]}" if self.live_dj else "▶️ Now playing"
+        embed.set_author(name=f"{state} · Deck {'AB'[self._slot]}")
         lines = []
         if self.paused:
             lines.append(f"Paused at {fmt_duration(self.elapsed)} / {fmt_duration(track.duration)}")
@@ -402,6 +477,8 @@ class GuildPlayer:
             lines.append(f"Ends <t:{ends}:R> · {fmt_duration(track.duration)}")
         else:
             lines.append("Live")
+        if self.live_dj:
+            lines.append(f"{self.live_dj[1]} is mixing live. `/mixer` to watch the decks.")
         if track.filler:
             lines.append("Playing because of 24/7 mode. `/play` something to take over.")
         elif track.auto:
@@ -448,6 +525,7 @@ class GuildPlayer:
         self.queue = [t for t in self.queue if not t.filler]  # the 24/7 station only fills an empty queue
         at = 0 if front else next((i for i, t in enumerate(self.queue) if t.auto), len(self.queue))
         self.queue[at:at] = new
+        self.queue_version += 1
         return at + 1
 
     def shuffle(self) -> None:
@@ -466,24 +544,30 @@ class GuildPlayer:
 
     # ── Playback ────────────────────────────────────────────────────
 
+    def _ensure_mixer(self) -> Mixer | None:
+        """Start the stream to Discord if it isn't running."""
+        vc = self.voice
+        if not vc or not vc.is_connected():
+            return None
+        if not self._mixer:
+            if vc.is_playing() or vc.is_paused():
+                return None
+            self._mixer = Mixer(self.volume)
+            try:
+                vc.play(self._mixer, after=self._session_ended)
+            except discord.ClientException:
+                log.exception("Couldn't start playback")
+                self._mixer = None
+                return None
+            self._conductor = asyncio.create_task(self._conduct())
+        self._mixer.hold = True
+        return self._mixer
+
     async def start(self) -> None:
-        """Start playing if nothing is."""
+        """Start playing if nothing is (in live mode the DJ decides what plays)."""
         async with self._lock:
-            vc = self.voice
-            if not vc or not vc.is_connected() or self._deck:
+            if self._deck or self.live_dj or not self._ensure_mixer():
                 return
-            if not self._mixer:
-                if vc.is_playing() or vc.is_paused():
-                    return
-                self._mixer = Mixer(self.volume)
-                try:
-                    vc.play(self._mixer, after=self._session_ended)
-                except discord.ClientException:
-                    log.exception("Couldn't start playback")
-                    self._mixer = None
-                    return
-                self._conductor = asyncio.create_task(self._conduct())
-            self._mixer.hold = True
             await self._load_next(frames(_START_FADE))
 
     async def _load_next(self, fade_in: int) -> bool:
@@ -505,10 +589,16 @@ class GuildPlayer:
                 deck.close()
                 return False
             deck.fade_in(fade_in)
-            mixer.add(deck)
-            self.current, self._deck = track, deck
-            self._slot ^= 1
+            deck.playing = True
+            slot = mixer.slot_of(deck)
+            if slot is None:
+                slot = 1 - self._slot
+                mixer.load(slot, deck)
+            self.current, self._deck, self._slot = track, deck, slot
             self.skip_votes.clear()
+            self.queue_version += 1
+            if self.consoles:
+                asyncio.create_task(self._analyse(deck))
             self._remember(track)
             await self.refresh_player(repost=True)
             self.prefetch()
@@ -560,17 +650,21 @@ class GuildPlayer:
         return Deck(track, audio, lookahead=frames(_LOOKAHEAD + self._crossfade_seconds()))
 
     def _take_primed(self, track: Track) -> Deck | None:
-        primed, self._primed = self._primed, None
-        if primed and primed.track is track:
+        if self._primed and self._primed.track is track:
+            primed, self._primed = self._primed, None
             return primed
-        if primed:
-            primed.close()
+        self._close_primed()
         return None
 
     def _close_primed(self) -> None:
-        if self._primed:
-            self._primed.close()
-            self._primed = None
+        primed, self._primed = self._primed, None
+        if not primed:
+            return
+        slot = self._mixer.slot_of(primed) if self._mixer else None
+        if slot is not None:
+            self._mixer.load(slot, None)
+        else:
+            primed.close()
 
     async def _prime(self) -> None:
         """Load the next track onto the other deck ahead of time, so the mix starts on cue."""
@@ -581,11 +675,15 @@ class GuildPlayer:
             deck = await self._open_deck(candidate, quiet=True)
             if deck is None:
                 return
-            if self._stopping or not self._mixer:
+            if self._stopping or not self._mixer or self.live_dj:
                 deck.close()
                 return
             self._close_primed()
+            deck.playing = False  # cued on the other deck until the mix
+            self._mixer.load(1 - self._slot, deck)
             self._primed = deck
+            if self.consoles:
+                asyncio.create_task(self._analyse(deck))
             await self.refresh_player()  # show it cued up on the other deck
         finally:
             self._priming = None
@@ -603,9 +701,12 @@ class GuildPlayer:
             while self._mixer:
                 await asyncio.sleep(_TICK)
                 vc, deck = self.voice, self._deck
+                now = time.monotonic()
+                if self.live_dj:
+                    self._follow_live(now)
+                    continue
                 if not vc or not deck or vc.is_paused() or self._lock.locked():
                     continue
-                now = time.monotonic()
                 expected = self.current if self.loop_mode == "track" else (self.queue[0] if self.queue else None)
                 primed_ok = self._primed and (expected is None or self._primed.track is expected)
                 if (self._should_prime(deck) and not self._priming and not primed_ok
@@ -678,7 +779,8 @@ class GuildPlayer:
             self._mixer.clear()
         self._mixer = None
         self.current = self._deck = None
-        self._close_primed()
+        self._primed = None
+        self.live_dj = None
         stopping, self._stopping = self._stopping, False
         station = (settings.stay(self.guild_id) or {}).get("station")
         vc = self.voice
@@ -710,6 +812,8 @@ class GuildPlayer:
 
     def stop(self) -> None:
         self.queue.clear()
+        self.queue_version += 1
+        self.live_dj = None
         self._close_primed()
         if self._mixer:
             self._stopping = True
@@ -744,10 +848,227 @@ class GuildPlayer:
         self._conductor = None
         self.current = self._deck = None
         self._stopping = False
+        self.live_dj = None
         if self._idle_task and self._idle_task is not asyncio.current_task():
             self._idle_task.cancel()
         self._idle_task = None
         asyncio.create_task(self.clear_player())
+
+    # ── Live mixing (the web mixer) ─────────────────────────────────
+
+    def _follow_live(self, now: float) -> None:
+        """In live mode, "now playing" is whichever deck is loudest in the mix."""
+        on_air = self._on_air()
+        if on_air and on_air[1] is not self._deck:
+            self._slot, self._deck = on_air
+            self.current = self._deck.track
+            self._remember(self.current)
+            self._last_booth = 0  # redraw now
+        if now - self._last_booth >= _LIVE_BOOTH_EVERY and not self._message_lock.locked() and self.current:
+            asyncio.create_task(self.refresh_player())
+
+    async def live_take(self, member: discord.Member) -> None:
+        """Hand the decks to `member`. Whatever is playing carries on exactly as it sounds."""
+        if self.live_dj and self.live_dj[0] != member.id and not member.guild_permissions.manage_guild:
+            raise UserError(f"{self.live_dj[1]} is on the decks right now.")
+        self.check_listener(member)
+        async with self._lock:
+            mixer = self._ensure_mixer()
+            if not mixer:
+                raise UserError("I couldn't start the audio. Try `/play` first.")
+            if self._priming:
+                self._priming.cancel()
+            self._primed = None
+            for slot, deck in enumerate(mixer.slots):
+                if deck and deck is not self._deck and deck.fading_out:
+                    mixer.load(slot, None)  # a half-finished automatic fade: drop it
+                elif deck:
+                    deck.clear_fades()
+            mixer.crossfader = float(self._slot) if self._deck else 0.0
+            mixer.manual = True
+            self.live_dj = (member.id, member.display_name)
+            for deck in mixer.decks:
+                if deck.bpm is None:
+                    asyncio.create_task(self._analyse(deck))
+        await self.notice(f"🎧 {member.display_name} has taken the decks and is mixing live.", lifetime=60)
+        await self.refresh_player()
+
+    async def live_release(self) -> None:
+        """Back to automatic mixing: the deck on air carries on, anything else fades away."""
+        if not self.live_dj:
+            return
+        name = self.live_dj[1]
+        async with self._lock:
+            self.live_dj = None
+            mixer = self._mixer
+            if not mixer:
+                return
+            on_air = self._on_air()
+            for slot, deck in enumerate(mixer.slots):
+                if not deck or (on_air and deck is on_air[1]):
+                    continue
+                if deck.playing and not deck.finished:
+                    deck.fade_out(frames(2))
+                else:
+                    mixer.load(slot, None)
+            mixer.manual = False
+            mixer.crossfader = float(on_air[0]) if on_air else 0.0
+            if on_air:
+                self._slot, self._deck = on_air
+                self.current = self._deck.track
+                self._deck.clear_fades()
+            else:
+                self.current = self._deck = None
+        if not on_air:
+            await self.start()
+        await self.notice(f"🎛️ {name} has left the decks. Back to automatic mixing.", lifetime=60)
+        await self.refresh_player()
+
+    def _live_deck(self, slot: int) -> Deck:
+        if not self.live_dj or not self._mixer:
+            raise UserError("Take the decks first.")
+        deck = self._mixer.slots[slot]
+        if not deck:
+            raise UserError(f"Deck {'AB'[slot]} is empty. Load a track onto it first.")
+        return deck
+
+    async def deck_load(self, slot: int, track: Track) -> None:
+        if not self.live_dj or not self._mixer:
+            raise UserError("Take the decks first.")
+        deck = await self._open_deck(track, quiet=True)
+        if deck is None:
+            raise UserError(f"Couldn't load **{track.title}**.")
+        deck.playing = False
+        old = self._mixer.slots[slot]
+        if old:  # a new record keeps the deck's settings, like a real mixer channel
+            deck.volume, deck.pitch, deck.filters = old.volume, old.pitch, old.filters
+        self._mixer.load(slot, deck)
+        if old is self._deck:
+            self._deck, self.current = deck, track
+        asyncio.create_task(self._analyse(deck))
+
+    async def deck_cue(self, slot: int) -> None:
+        """Back to the start of the track, paused (reloads it, as the stream can't rewind)."""
+        deck = self._live_deck(slot)
+        bpm = deck.bpm
+        await self.deck_load(slot, deck.track)
+        self._mixer.slots[slot].bpm = bpm
+
+    def deck_play(self, slot: int, playing: bool) -> None:
+        deck = self._live_deck(slot)
+        if deck.finished:
+            raise UserError("That track has finished. Cue it or load another.")
+        deck.playing = playing
+
+    def deck_set(self, slot: int, param: str, value: float) -> None:
+        deck = self._live_deck(slot)
+        if param == "volume":
+            deck.volume = min(1.0, max(0.0, value))
+        elif param in ("low", "mid", "high"):
+            setattr(deck.filters, param, min(6.0, max(dsp.EQ_KILL, value)))
+        elif param == "filter":
+            deck.filters.filter = min(1.0, max(-1.0, value))
+        elif param == "pitch":
+            deck.pitch = min(1 + PITCH_RANGE, max(1 - PITCH_RANGE, value))
+        elif param == "nudge":
+            deck.nudge = min(NUDGE, max(-NUDGE, value))
+        else:
+            raise UserError(f"Unknown control {param}.")
+
+    def deck_sync(self, slot: int) -> float:
+        """Match this deck's tempo to the other deck's. Returns the new pitch."""
+        deck, other = self._live_deck(slot), self._mixer.slots[1 - slot]
+        if not deck.bpm or not other or not other.effective_bpm:
+            raise UserError("Both decks need a BPM first (it takes a few seconds after loading).")
+        target = other.effective_bpm
+        options = [target / deck.bpm, target * 2 / deck.bpm, target / 2 / deck.bpm]  # half/double time counts too
+        pitch = min(options, key=lambda p: abs(p - 1))
+        if abs(pitch - 1) > PITCH_RANGE:
+            raise UserError(f"{deck.bpm:g} and {target:g} BPM are too far apart to sync (more than ±{PITCH_RANGE:.0%}).")
+        deck.pitch = pitch
+        return pitch
+
+    def mixer_set(self, param: str, value) -> None:
+        if not self.live_dj or not self._mixer:
+            raise UserError("Take the decks first.")
+        mixer = self._mixer
+        if param == "crossfader":
+            mixer._move = None
+            mixer.crossfader = min(1.0, max(0.0, float(value)))
+        elif param == "curve":
+            mixer.curve = "cut" if value == "cut" else "smooth"
+        elif param == "master":
+            mixer.master = min(1.5, max(0.0, float(value)))
+        elif param == "autofade":  # glide the crossfader to deck `value[0]` over value[1] seconds
+            target, seconds = value
+            mixer.move_crossfader(float(target), min(60.0, max(0.5, float(seconds))))
+        else:
+            raise UserError(f"Unknown control {param}.")
+
+    def take_from_queue(self, index: int) -> Track:
+        if not 0 <= index < len(self.queue):
+            raise UserError("That track isn't in the queue any more.")
+        return self.queue.pop(index)
+
+    async def _analyse(self, deck: Deck) -> None:
+        """Find a deck's tempo in the background (cached per song)."""
+        track = deck.track
+        if track.kind == "stream" or deck.bpm:
+            return
+        key = tracks.video_id(track.page_url) or tracks.video_id(track.source) or f"{track.kind}:{track.source}"
+        cache = store.load(_BPM_FILE, {})
+        if key in cache:
+            deck.bpm = cache[key]
+            return
+        try:
+            playable = await tracks.stream_for(track)
+            loop = asyncio.get_running_loop()
+            samples = await loop.run_in_executor(None, _decode_for_analysis, playable)
+            bpm = await loop.run_in_executor(None, dsp.detect_bpm, samples)
+        except Exception:
+            log.exception("Tempo detection failed for %s", track.title)
+            return
+        if bpm:
+            deck.bpm = bpm
+            cache = store.load(_BPM_FILE, {})
+            cache[key] = bpm
+            store.save(_BPM_FILE, cache)
+
+    def snapshot(self) -> dict:
+        """Everything the mixer page shows, sent several times a second."""
+        mixer = self._mixer
+        decks = []
+        for slot in (0, 1):
+            deck = mixer.slots[slot] if mixer else None
+            if not deck:
+                decks.append(None)
+                continue
+            f = deck.filters
+            decks.append({
+                "title": deck.track.title, "duration": deck.track.duration, "elapsed": round(deck.elapsed, 2),
+                "playing": deck.playing and not deck.finished, "ended": deck.finished, "on_air": deck is self._deck,
+                "volume": deck.volume, "low": f.low, "mid": f.mid, "high": f.high, "filter": f.filter,
+                "pitch": deck.pitch, "nudge": deck.nudge, "bpm": deck.bpm, "effective_bpm": deck.effective_bpm,
+                "level": round(deck.level, 4), "page_url": deck.track.page_url,
+            })
+        vc = self.voice
+        return {
+            "live": {"id": str(self.live_dj[0]), "name": self.live_dj[1]} if self.live_dj else None,
+            "paused": self.paused,
+            "voice": vc.channel.name if vc and vc.channel else None,
+            "mixer": {
+                "crossfader": round(mixer.crossfader, 4) if mixer else 0.0,
+                "curve": mixer.curve if mixer else "smooth",
+                "master": mixer.master if mixer else 1.0,
+                "manual": bool(mixer and mixer.manual),
+            },
+            "decks": decks,
+            "queue_key": hash(tuple(id(t) for t in self.queue[:50])),
+        }
+
+    def queue_snapshot(self) -> list[dict]:
+        return [{"title": t.title, "duration": t.duration, "auto": t.auto, "filler": t.filler, "by": t.requester}
+                for t in self.queue[:50]]
 
     # ── Auto-DJ ─────────────────────────────────────────────────────
 

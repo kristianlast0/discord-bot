@@ -1,0 +1,12 @@
+[Unit]
+Description=ngrok tunnel for the Discord music bot's web mixer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/ngrok http 127.0.0.1:@PORT@ --url=https://@DOMAIN@ --log=stdout --log-level=warn
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

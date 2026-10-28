@@ -26,3 +26,5 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data")).expanduser()
 IDLE_TIMEOUT = int(os.environ.get("IDLE_TIMEOUT", "300"))  # seconds before leaving an idle/empty channel
 DEFAULT_VOLUME = int(os.environ.get("DEFAULT_VOLUME", "50"))  # percent
 MAX_PLAYLIST_IMPORT = int(os.environ.get("MAX_PLAYLIST_IMPORT", "200"))  # tracks taken from one playlist link
+MIXER_PORT = int(os.environ.get("MIXER_PORT", "8765"))  # the web mixer listens on 127.0.0.1 only
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "")  # how people reach it, e.g. https://example.ngrok-free.app

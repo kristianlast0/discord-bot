@@ -9,6 +9,7 @@ from discord.ext import commands
 from . import config, settings
 from .cog import Music, on_app_command_error
 from .radio_ui import RadioPanel
+from .web import MixerServer
 
 log = logging.getLogger("music_bot")
 
@@ -21,6 +22,11 @@ class MusicBot(commands.Bot):
         music = Music(self)
         await self.add_cog(music)
         self.add_view(RadioPanel(music))  # keeps panel buttons working after restarts
+        self.mixer_server = MixerServer(self, music)
+        try:
+            await self.mixer_server.start()
+        except OSError as e:
+            log.error("Couldn't start the web mixer on port %d: %s", config.MIXER_PORT, e)
         self.tree.error(on_app_command_error)
         if config.GUILD_ID:
             guild = discord.Object(config.GUILD_ID)
@@ -58,6 +64,8 @@ class MusicBot(commands.Bot):
         music = self.get_cog("Music")
         if music:
             await music.shutdown()
+        if getattr(self, "mixer_server", None):
+            await self.mixer_server.stop()
         await super().close()
 
 
