@@ -37,9 +37,9 @@ The bot leaves after `IDLE_TIMEOUT` seconds (default 5 minutes) of nothing playi
 2. Invite it to your server (replace `APP_ID` with the Application ID from **General Information**):
    `https://discord.com/oauth2/authorize?client_id=APP_ID&scope=bot+applications.commands&permissions=3165184`
    (View Channels, Send Messages, Embed Links, Connect, Speak).
-3. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN`, plus `GUILD_ID` (your server's ID: Discord settings →
-   Advanced → Developer Mode, then right-click the server → Copy Server ID). Without `GUILD_ID` the commands work in
-   every server the bot is in, but can take up to an hour to appear.
+3. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN`. Slash commands are registered globally, so they work in
+   every server the bot is invited to (new or changed commands can take up to an hour to appear). `GUILD_ID` is only
+   needed if an older version registered commands to one server: set it to that server's ID to clear the duplicates.
 
 ### 2a. Run it with Docker (Windows, Mac or Linux)
 
@@ -59,7 +59,7 @@ Put your own music files in `./music` for `/local`. Logs: `docker compose logs -
 sudo apt install ffmpeg       # if it isn't installed already
 git clone <this repo> && cd <repo>/music-bot
 bash deploy/install.sh        # installs uv, Python 3.12 and the rest in your home folder; no sudo needed
-nano .env                     # fill in DISCORD_TOKEN and GUILD_ID
+nano .env                     # fill in DISCORD_TOKEN
 systemctl --user restart discord-music-bot
 ```
 

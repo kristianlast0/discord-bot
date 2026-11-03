@@ -28,13 +28,14 @@ class MusicBot(commands.Bot):
         except OSError as e:
             log.error("Couldn't start the web mixer on port %d: %s", config.MIXER_PORT, e)
         self.tree.error(on_app_command_error)
+        # Always register globally so every server the bot is in gets the commands.
+        synced = await self.tree.sync()
+        log.info("Synced %d slash commands globally", len(synced))
         if config.GUILD_ID:
+            # Older versions registered commands to this one server; clear those so they don't show up twice.
             guild = discord.Object(config.GUILD_ID)
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-        else:
-            synced = await self.tree.sync()
-        log.info("Synced %d slash commands%s", len(synced), " to the server" if config.GUILD_ID else " globally")
+            self.tree.clear_commands(guild=guild)
+            await self.tree.sync(guild=guild)
 
     async def on_ready(self):
         log.info("Logged in as %s; music folder %s", self.user, config.MUSIC_DIR)
